@@ -1,10 +1,12 @@
 <?php
-/** Générateur PDF minimal (polices Helvetica standard, A4 paysage) : texte, traits et rectangles. Aucune dépendance. */
+/** Générateur PDF minimal (polices Helvetica standard, A4 paysage) : texte, traits, rectangles et images (via GD). Aucune dépendance externe. */
 class Pdf
 {
     const W = 842, H = 595;
     private $pages = [];
     private $cur = -1;
+    private $images = [];   // [données JPEG, largeur px, hauteur px]
+    private $parFichier = [];
 
     public function page() { $this->pages[] = ''; $this->cur = count($this->pages) - 1; return $this->cur + 1; }
     public function select($n) { $this->cur = $n - 1; }
@@ -63,6 +65,32 @@ class Pdf
         $this->pages[$this->cur] .= sprintf("%s RG %.2f w %.2f %.2f m %.2f %.2f l S\n", self::color($hex), $width, $x1, self::H - $y1, $x2, self::H - $y2);
     }
 
+    /**
+     * Image (PNG, JPEG, WEBP, GIF) ajustée dans la boîte x, y, w, h sans déformation ; aplatie sur fond blanc et intégrée en JPEG.
+     * Renvoie la largeur réellement occupée (0 si l'image est illisible ou GD absent).
+     */
+    public function image($file, $x, $y, $w, $h)
+    {
+        if (!function_exists('imagecreatefromstring') || !is_file($file)) return 0;
+        $cle = realpath($file);
+        if (!isset($this->parFichier[$cle])) {   // une image répétée sur chaque page n'est intégrée qu'une fois
+            $src = @imagecreatefromstring((string)file_get_contents($file));
+            if (!$src) return 0;
+            $sw = imagesx($src); $sh = imagesy($src);
+            $f = min(1, 300 / max($sw, $sh));   // 300 px suffisent pour un logo d'en-tête : fichier léger
+            $pw = max(1, (int)round($sw * $f)); $ph = max(1, (int)round($sh * $f));
+            $img = imagecreatetruecolor($pw, $ph);
+            imagefill($img, 0, 0, imagecolorallocate($img, 255, 255, 255));
+            imagecopyresampled($img, $src, 0, 0, 0, 0, $pw, $ph, $sw, $sh);
+            ob_start(); imagejpeg($img, null, 90); $jpeg = ob_get_clean();
+            $this->parFichier[$cle] = count($this->images); $this->images[] = [$jpeg, $pw, $ph];
+        }
+        $k = $this->parFichier[$cle]; list(, $pw, $ph) = $this->images[$k];
+        $r = min($w / $pw, $h / $ph); $dw = $pw * $r; $dh = $ph * $r;
+        $this->pages[$this->cur] .= sprintf("q %.2f 0 0 %.2f %.2f %.2f cm /Im%d Do Q\n", $dw, $dh, $x, self::H - $y - ($h + $dh) / 2, $k);
+        return $dw;
+    }
+
     public function save($path)
     {
         $objs = [];
@@ -73,9 +101,17 @@ class Pdf
         $objs[2] = '<< /Type /Pages /Kids [' . implode(' ', $kids) . '] /Count ' . $n . ' >>';
         $objs[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>';
         $objs[4] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>';
+        // Images : objets placés après les pages, partagés par toutes les pages
+        $xobj = '';
+        foreach ($this->images as $k => $im) {
+            $o = 5 + $n * 2 + $k;
+            $objs[$o] = "<< /Type /XObject /Subtype /Image /Width {$im[1]} /Height {$im[2]} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length " . strlen($im[0]) . " >>\nstream\n" . $im[0] . "\nendstream";
+            $xobj .= "/Im$k $o 0 R ";
+        }
+        $res = '<< /Font << /F1 3 0 R /F2 4 0 R >>' . ($xobj ? " /XObject << $xobj>>" : '') . ' >>';
         foreach ($this->pages as $i => $content) {
             $p = 5 + $i * 2;
-            $objs[$p] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' . self::W . ' ' . self::H . '] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ' . ($p + 1) . ' 0 R >>';
+            $objs[$p] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' . self::W . ' ' . self::H . '] /Resources ' . $res . ' /Contents ' . ($p + 1) . ' 0 R >>';
             $objs[$p + 1] = "<< /Length " . strlen($content) . " >>\nstream\n" . $content . "endstream";
         }
         $out = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n"; $off = [];

@@ -6,6 +6,7 @@
 
 const TYPES_MOUVEMENT = [
     'initial' => 'Stock initial', 'entree_achat' => "Entrée d'achat", 'sortie_vente' => 'Vente', 'annulation_vente' => 'Annulation de vente',
+    'sortie_commande' => 'Commande', 'annulation_commande' => 'Annulation de commande',
     'ajustement' => 'Ajustement', 'perte' => 'Perte / casse', 'inventaire' => 'Inventaire',
 ];
 
@@ -129,4 +130,37 @@ function mouvements_liste(PDO $db, array $q)
     $rows = $st->fetchAll(PDO::FETCH_ASSOC);
     foreach ($rows as &$r) { $r['libelle_type'] = TYPES_MOUVEMENT[$r['type']] ?? $r['type']; $r['utilisateur'] = trim((string)$r['utilisateur']); }
     return ['data' => $rows, 'meta' => ['total' => $total, 'page' => $page, 'per_page' => $per, 'pages' => max(1, (int)ceil($total / $per))]];
+}
+
+/**
+ * Balance des stocks d'un mois, par produit stockable : stock initial + entrées − sorties ± ajustements = stock final.
+ * Les soldes sont reconstitués depuis le stock actuel en remontant les mouvements (stock final = actuel − mouvements postérieurs).
+ * Valorisation au prix d'achat actuel.
+ */
+function stock_balance(PDO $db, $mois)
+{
+    if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', (string)$mois)) $mois = gmdate('Y-m');
+    $debut = $mois . '-01 00:00:00'; $fin = gmdate('Y-m-t', strtotime($mois . '-01')) . ' 23:59:59';
+    $st = $db->prepare("SELECT pr.idprod, pr.nom, pr.unite, pr.prix_achat, pr.stock_qty, c.nom AS categorie,
+            COALESCE(SUM(CASE WHEN m.created_at > :fin1 THEN m.quantite END), 0) AS apres,
+            COALESCE(SUM(CASE WHEN m.created_at >= :deb1 AND m.created_at <= :fin2 AND m.type IN ('initial', 'entree_achat') THEN m.quantite END), 0) AS entrees,
+            COALESCE(SUM(CASE WHEN m.created_at >= :deb2 AND m.created_at <= :fin3 AND m.type IN ('sortie_vente', 'annulation_vente', 'sortie_commande', 'annulation_commande') THEN m.quantite END), 0) AS sorties,
+            COALESCE(SUM(CASE WHEN m.created_at >= :deb3 AND m.created_at <= :fin4 AND m.type IN ('ajustement', 'perte', 'inventaire') THEN m.quantite END), 0) AS ajustements,
+            COUNT(CASE WHEN m.created_at >= :deb4 AND m.created_at <= :fin5 THEN 1 END) AS nb
+        FROM produits pr LEFT JOIN categories c ON c.idcat = pr.idcat LEFT JOIN mouvements_stock m ON m.idprod = pr.idprod
+        WHERE pr.supp = 0 AND pr.stockable = 1 AND pr.type = 'produit'
+        GROUP BY pr.idprod, pr.nom, pr.unite, pr.prix_achat, pr.stock_qty, c.nom ORDER BY c.nom, pr.nom");
+    $st->execute(['fin1' => $fin, 'fin2' => $fin, 'fin3' => $fin, 'fin4' => $fin, 'fin5' => $fin, 'deb1' => $debut, 'deb2' => $debut, 'deb3' => $debut, 'deb4' => $debut]);
+    $rows = []; $tot = ['valeur_initiale' => 0, 'valeur_entrees' => 0, 'valeur_sorties' => 0, 'valeur_ajustements' => 0, 'valeur_finale' => 0];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $final = round($r['stock_qty'] - $r['apres'], 3);
+        $e = $r['entrees'] + 0; $s = -($r['sorties'] + 0); $a = $r['ajustements'] + 0;
+        $initial = round($final - $e + $s - $a, 3);
+        $pa = $r['prix_achat'] + 0;
+        $ligne = ['idprod' => (int)$r['idprod'], 'nom' => $r['nom'], 'categorie' => $r['categorie'] ?: 'Sans catégorie', 'unite' => $r['unite'], 'prix_achat' => $pa,
+            'initial' => $initial, 'entrees' => $e, 'sorties' => $s, 'ajustements' => $a, 'final' => $final, 'nb' => (int)$r['nb'], 'valeur_finale' => round($final * $pa, 2)];
+        $tot['valeur_initiale'] += $initial * $pa; $tot['valeur_entrees'] += $e * $pa; $tot['valeur_sorties'] += $s * $pa; $tot['valeur_ajustements'] += $a * $pa; $tot['valeur_finale'] += $final * $pa;
+        $rows[] = $ligne;
+    }
+    return ['mois' => $mois, 'produits' => $rows, 'totaux' => array_map(function ($v) { return round($v, 2); }, $tot)];
 }

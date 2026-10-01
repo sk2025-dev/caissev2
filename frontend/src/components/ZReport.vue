@@ -103,12 +103,13 @@ const edite = new Date().toISOString().slice(0, 19).replace('T', ' ')
         <tr><td>− Sorties d'espèces</td><td class="n">−{{ money(rapport.sorties_caisse) }}</td></tr>
         <tr class="sum"><td>Espèces attendues dans le tiroir</td><td class="n">{{ money(rapport.attendu_especes) }}</td></tr>
         <template v-if="!ouverte">
-          <tr><td>Espèces comptées</td><td class="n">{{ money(s.compte_especes) }}</td></tr>
-          <tr class="ecart" :class="Number(s.ecart) === 0 ? 'ok' : Number(s.ecart) < 0 ? 'ko' : 'plus'"><td>Écart de caisse <small>({{ Number(s.ecart) === 0 ? 'caisse juste' : Number(s.ecart) < 0 ? 'manque' : 'excédent' }})</small></td><td class="n">{{ signe(s.ecart) }}</td></tr>
+          <tr v-if="s.forcee_par"><td>Espèces comptées</td><td class="n">non comptées (clôture forcée)</td></tr>
+          <tr v-if="!s.forcee_par"><td>Espèces comptées</td><td class="n">{{ money(s.compte_especes) }}</td></tr>
+          <tr v-if="!s.forcee_par" class="ecart" :class="Number(s.ecart) === 0 ? 'ok' : Number(s.ecart) < 0 ? 'ko' : 'plus'"><td>Écart de caisse <small>({{ Number(s.ecart) === 0 ? 'caisse juste' : Number(s.ecart) < 0 ? 'manque' : 'excédent' }})</small></td><td class="n">{{ signe(s.ecart) }}</td></tr>
         </template>
       </tbody>
     </table>
-    <p v-if="s.notes" class="note"><b>Note du caissier :</b> {{ s.notes }}</p>
+    <p v-if="s.notes" class="note"><b>{{ s.forcee_par ? 'Clôture forcée' : 'Note du caissier' }} :</b> {{ s.forcee_par ? s.notes.replace(/^Clôture forcée /, '') : s.notes }}</p>
 
     <div class="sign">
       <div><span>Le caissier</span><i /><small>{{ s.caissier }}</small></div>

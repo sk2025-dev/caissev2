@@ -1,12 +1,14 @@
 <script setup>
 // Prise de commande (livraison ou retrait) : depuis la page Commandes ou depuis le panier de la caisse.
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import { api, auth, fileUrl, ApiError } from '../api'
 import { lookups, loadLookups } from '../lookups'
 import { money, qty } from '../format'
 import { toast } from '../toast'
+import { resources } from '../resources'
 import Icon from './Icon.vue'
 import SearchSelect from './SearchSelect.vue'
+import FormDrawer from './FormDrawer.vue'
 
 const props = defineProps({
   lignesInit: { type: Array, default: () => [] },   // [{ idprod, nom, unite, quantite, prix }]
@@ -22,6 +24,9 @@ const erreurs = ref({})
 const erreur = ref('')
 const busy = ref(false)
 const q = ref('')
+const rechercheArticle = ref(null)
+const creationArticle = ref(null)
+const peutCreerArticle = computed(() => resources.produits.write(auth.user))
 /* ---- Lieu et prix de la livraison : grille de tarifs par zone (Abidjan par quartier, intérieur par ville, extérieur) ---- */
 const ZONES = [['abidjan', 'Abidjan', 'Tous les quartiers'], ['interieur', 'Intérieur du pays', 'Toutes les villes'], ['exterieur', 'Extérieur', 'Hors Côte d\'Ivoire']]
 const AUTRE = '__autre'
@@ -66,10 +71,31 @@ const resultats = computed(() => {
   return produits.value.filter((p) => norm(p.nom).includes(t) || norm(p.sku).includes(t) || norm(p.code_barres).includes(t)).slice(0, 8)
 })
 function ajouter(p) {
-  const l = lignes.value.find((x) => x.idprod === p.id)
+  const l = lignes.value.find((x) => String(x.idprod) === String(p.id))
   if (l) l.quantite = Number(l.quantite) + 1
   else lignes.value.push({ idprod: p.id, nom: p.nom, unite: p.unite, quantite: 1, prix: p.prix_vente })
   q.value = ''
+}
+function creerArticle() {
+  if (!peutCreerArticle.value || busy.value) return
+  const nom = q.value.trim()
+  creationArticle.value = {
+    ...resources.produits,
+    singular: 'produit ou service',
+    // Un article créé depuis une commande doit être disponible à la vente.
+    fields: resources.produits.fields.filter((f) => f.name !== 'actif').map((f) => (
+      f.name === 'nom' ? { ...f, default: () => nom } : f
+    )),
+  }
+}
+async function articleCree(p) {
+  const article = { ...p, id: p.idprod }
+  produits.value.push(article)
+  ajouter(article)
+  creationArticle.value = null
+  loadLookups(true).catch(() => {})
+  await nextTick()
+  rechercheArticle.value?.focus()
 }
 const changer = (l, v) => {
   let n = Number(v)
@@ -138,11 +164,13 @@ async function envoyer() {
         </section>
 
         <section class="articles">
-          <div class="search"><Icon name="search" :size="16" /><input v-model="q" class="input" type="search" placeholder="Ajouter un article…" aria-label="Ajouter un article" autocomplete="off" />
+          <div class="search"><Icon name="search" :size="16" /><input ref="rechercheArticle" v-model="q" class="input" type="search" placeholder="Rechercher un produit ou un service…" aria-label="Ajouter un produit ou un service" autocomplete="off" @keydown.enter.prevent="resultats.length && ajouter(resultats[0])" />
             <ul v-if="resultats.length" class="found">
               <li v-for="p in resultats" :key="p.id"><button type="button" @click="ajouter(p)"><span class="th"><img v-if="p.image" :src="fileUrl('produits', p.image)" alt="" /><Icon v-else name="box" :size="16" /></span><b>{{ p.nom }}</b><span>{{ money(p.prix_vente) }}</span></button></li>
             </ul>
           </div>
+          <p v-if="q.trim() && !resultats.length" class="hint aucun-resultat" role="status">Aucun produit ou service ne correspond à cette recherche.</p>
+          <button v-if="peutCreerArticle" type="button" class="btn creer-article" :disabled="busy" @click="creerArticle"><Icon name="plus" :size="16" /> Créer un produit / service</button>
           <div v-if="!lignes.length" class="vide"><Icon name="cart" :size="30" /><span>Aucun article</span></div>
           <div v-for="l in lignes" :key="l.idprod" class="art">
             <b>{{ l.nom }}</b>
@@ -161,6 +189,7 @@ async function envoyer() {
         </section>
       </div>
 
+      <p class="hint">Les articles sont déduits du stock dès l'enregistrement. Une annulation les remet en stock. Le paiement se fait à la remise.</p>
       <div v-if="erreur && !Object.keys(erreurs).length" class="alert" role="alert">{{ erreur }}</div>
       <div class="row">
         <button type="button" class="btn" @click="emit('close')">Annuler</button>
@@ -168,6 +197,7 @@ async function envoyer() {
       </div>
     </form>
   </div>
+  <FormDrawer v-if="creationArticle" :config="creationArticle" route="produits" id-key="idprod" @close="creationArticle = null" @saved="articleCree" />
 </template>
 
 <style scoped>
@@ -186,6 +216,8 @@ section { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .search { position: relative; }
 .search > svg { position: absolute; left: 13px; top: 15px; color: var(--muted); }
 .search .input { padding-left: 38px; }
+.creer-article { align-self: flex-start; color: var(--primary); }
+.aucun-resultat { margin: 0; }
 .found { position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px; list-style: none; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-lg); }
 .found button { width: 100%; display: flex; align-items: center; gap: 10px; border: 0; background: none; padding: 8px; border-radius: 10px; font: inherit; color: inherit; cursor: pointer; text-align: left; }
 .found button:hover { background: var(--primary-soft); } .found b { flex: 1; font-weight: 600; font-size: 14px; } .found span:last-child { color: var(--primary); font-weight: 700; }

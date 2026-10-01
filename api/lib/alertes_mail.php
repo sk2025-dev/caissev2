@@ -36,7 +36,7 @@ function alertes_message(array $sections, array $all)
         $t .= strtoupper($s['titre']) . "\n";
         foreach ($s['lignes'] as $l) {
             $h .= '<tr><td style="padding:8px 0;border-bottom:1px solid #eee;font-weight:bold">' . htmlspecialchars($l['label']) . '</td><td style="padding:8px 0;border-bottom:1px solid #eee;text-align:right;color:' . $couleur[$l['niveau']] . ';font-weight:bold">' . htmlspecialchars($l['detail']) . '</td></tr>';
-            $t .= ' - ' . $l['label'] . ' : ' . $l['detail'] . "\n";
+            $t .= ' - ' . $l['label'] . ($l['detail'] !== '' ? ' : ' . $l['detail'] : '') . "\n";
         }
         $h .= '</table>'; $t .= "\n";
     }

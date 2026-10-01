@@ -1,17 +1,20 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { api, auth, prenomDe } from '../api'
-import { money, number, qty, dateHeure, alerteLibelle } from '../format'
+import { money, number, qty, dateHeure, alerteLibelle, uniteAccord } from '../format'
 import Icon from '../components/Icon.vue'
 import Illus from '../components/Illus.vue'
 import CountUp from '../components/CountUp.vue'
 import SalesChart from '../components/SalesChart.vue'
 import DonutChart from '../components/DonutChart.vue'
+import MonthlyJournal from '../components/MonthlyJournal.vue'
+import StockBalance from '../components/StockBalance.vue'
 
 const d = ref(null)
 const alertes = ref([])
 const error = ref('')
 const rep = ref('categories')
+const toutesAlertes = ref(false)
 onMounted(async () => {
   try {
     d.value = await api.get('dashboard')
@@ -26,7 +29,10 @@ const greeting = computed(() => {
 })
 const jourLabel = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
 const fmt = (v) => number(Math.round(v))
-const maxTop = computed(() => Math.max(1, ...(d.value?.top_produits || []).map((p) => p.ca)))
+const perf = ref('montant')   // performance des produits : 'montant' | 'nombre'
+const topListe = computed(() => (perf.value === 'nombre' ? d.value?.top_quantite : d.value?.top_produits) || [])
+const valeurTop = (p) => (perf.value === 'nombre' ? p.quantite : p.ca)
+const maxTop = computed(() => Math.max(1, ...topListe.value.map(valeurTop)))
 const maxHeure = computed(() => Math.max(1, ...(d.value?.heures || []).map((h) => h.ca)))
 const heuresUtiles = computed(() => (d.value?.heures || []).filter((h) => h.h >= 6 && h.h <= 22))
 const repartition = computed(() => d.value?.[rep.value])
@@ -104,13 +110,16 @@ const delta = (v) => (v === null || v === undefined ? null : v)
           <div class="card-head"><h2>À surveiller</h2><span v-if="alertes.length" class="badge warning">{{ alertes.length }}</span></div>
           <div v-if="!alertes.length" class="muted">Rien à signaler. 🎉</div>
           <div class="list">
-            <RouterLink v-for="a in alertes.slice(0, 6)" :key="a.type + a.id" class="item" :to="a.type === 'ecart_caisse' ? '/sessions' : a.type === 'creances' ? `/clients/${a.id}` : a.id ? `/produits/${a.id}` : '/'" style="text-decoration:none;color:inherit">
+            <RouterLink v-for="a in toutesAlertes ? alertes : alertes.slice(0, 6)" :key="a.type + a.id" class="item" :to="a.type === 'ecart_caisse' ? '/sessions' : a.type === 'creances' ? `/clients/${a.id}` : a.id ? `/produits/${a.id}` : '/'" style="text-decoration:none;color:inherit">
               <span class="tile" :class="a.niveau"><Icon name="alert" :size="19" /></span>
-              <div class="grow"><b>{{ a.label }}</b><span>{{ alerteLibelle(a.type) }} · {{ a.detail }}</span></div>
+              <div class="grow"><b>{{ a.label }}</b><span>{{ alerteLibelle(a.type) }}<template v-if="a.detail"> · {{ a.detail }}</template></span></div>
             </RouterLink>
           </div>
+          <button v-if="alertes.length > 6" class="btn sm ghost voir-tout" @click="toutesAlertes = !toutesAlertes">{{ toutesAlertes ? 'Afficher moins' : `Voir les ${alertes.length} alertes` }}</button>
         </section>
       </div>
+
+      <MonthlyJournal v-if="gerant" class="reveal" style="--i:7" />
 
       <div v-if="gerant" class="grid-even">
         <section class="card card-pad col reveal" style="--i:7">
@@ -126,13 +135,21 @@ const delta = (v) => (v === null || v === undefined ? null : v)
         </section>
 
         <section class="card card-pad reveal" style="--i:8">
-          <div class="card-head"><h2>Produits les plus vendus</h2><RouterLink to="/produits" class="btn sm ghost">Catalogue</RouterLink></div>
-          <div v-if="!d.top_produits.length" class="muted">Aucune vente ce mois-ci.</div>
-          <div v-for="(p, i) in d.top_produits" :key="p.id" class="bar-row">
-            <span class="name" :title="p.nom">{{ p.nom }}</span>
-            <div class="track"><div class="fill" :style="{ width: (p.ca / maxTop) * 100 + '%', '--i': i }" /></div>
-            <b>{{ money(p.ca) }}</b>
+          <div class="card-head">
+            <h2>Performance des produits <small class="muted" style="font-weight:400">(mois)</small></h2>
+            <div class="seg" role="tablist" aria-label="Classer par">
+              <button :class="{ on: perf === 'nombre' }" role="tab" :aria-selected="perf === 'nombre'" @click="perf = 'nombre'">Par nombre</button>
+              <button :class="{ on: perf === 'montant' }" role="tab" :aria-selected="perf === 'montant'" @click="perf = 'montant'">Par montant</button>
+            </div>
           </div>
+          <div v-if="!topListe.length" class="muted">Aucune vente ce mois-ci.</div>
+          <div v-for="(p, i) in topListe" :key="perf + p.id" class="bar-row" :title="`${p.nom} — ${qty(p.quantite)} ${uniteAccord(p.quantite, p.unite)} · ${money(p.ca)} · ${p.nb_ventes} vente${p.nb_ventes > 1 ? 's' : ''}`">
+            <span class="name">{{ p.nom }}</span>
+            <div class="track"><div class="fill" :style="{ width: (valeurTop(p) / maxTop) * 100 + '%', '--i': i }" /></div>
+            <b v-if="perf === 'nombre'">{{ qty(p.quantite) }} <small class="muted" style="font-weight:600">{{ uniteAccord(p.quantite, p.unite) }}</small></b>
+            <b v-else>{{ money(p.ca) }}</b>
+          </div>
+          <RouterLink to="/produits" class="btn sm ghost voir-tout">Voir le catalogue</RouterLink>
         </section>
       </div>
 
@@ -167,13 +184,15 @@ const delta = (v) => (v === null || v === undefined ? null : v)
         </div>
       </div>
 
+      <StockBalance v-if="d.stock" class="reveal" style="--i:12" />
+
       <section v-if="d.stock && d.stock.a_surveiller.length" class="card card-pad reveal" style="--i:12">
         <div class="card-head"><h2>Stocks à réapprovisionner</h2><RouterLink to="/stock" class="btn sm ghost">Voir le stock</RouterLink></div>
         <div class="list">
           <RouterLink v-for="p in d.stock.a_surveiller" :key="p.id" class="item" :to="`/produits/${p.id}`" style="text-decoration:none;color:inherit">
             <span class="tile" :class="Number(p.stock_qty) <= 0 ? 'danger' : 'warning'"><Icon name="box" :size="19" /></span>
-            <div class="grow"><b>{{ p.nom }}</b><span>seuil d'alerte : {{ qty(p.seuil_alerte) }} {{ p.unite }}</span></div>
-            <span class="badge" :class="Number(p.stock_qty) <= 0 ? 'danger' : 'warning'">{{ Number(p.stock_qty) <= 0 ? 'Rupture' : `${qty(p.stock_qty)} ${p.unite}` }}</span>
+            <div class="grow"><b>{{ p.nom }}</b><span>seuil d'alerte : {{ qty(p.seuil_alerte) }} {{ uniteAccord(p.seuil_alerte, p.unite) }}</span></div>
+            <span class="badge" :class="Number(p.stock_qty) <= 0 ? 'danger' : 'warning'">{{ Number(p.stock_qty) <= 0 ? 'Rupture' : `${qty(p.stock_qty)} ${uniteAccord(p.stock_qty, p.unite)}` }}</span>
           </RouterLink>
         </div>
       </section>
@@ -186,4 +205,5 @@ const delta = (v) => (v === null || v === undefined ? null : v)
 .hcol { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 4px; font-size: 10px; color: var(--muted); }
 .hcol i { width: 100%; border-radius: 4px 4px 2px 2px; background: linear-gradient(180deg, var(--primary), color-mix(in srgb, var(--primary) 45%, transparent)); min-height: 3px; transition: filter .2s; }
 .hcol:hover i { filter: brightness(1.15); }
+.voir-tout { margin-top: 8px; width: 100%; justify-content: center; }
 </style>

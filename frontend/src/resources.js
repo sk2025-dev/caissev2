@@ -1,5 +1,6 @@
 // Configuration déclarative des écrans CRUD : colonnes du tableau et champs du formulaire.
-import { money, qty } from './format'
+import { money, qty, uniteAccord } from './format'
+import { fileUrl } from './api'
 
 const oui = [{ value: 1, label: 'Oui' }, { value: 0, label: 'Non' }]
 const catalogue = (u) => !!u?.droits?.catalogue_ecriture
@@ -21,7 +22,7 @@ export const resources = {
         if (!Number(r.stockable)) return { text: 'Service', cls: 'primary' }
         const q = Number(r.stock_qty)
         const cls = q <= 0 ? 'danger' : Number(r.seuil_alerte) > 0 && q <= Number(r.seuil_alerte) ? 'warning' : 'success'
-        return { text: `${qty(q)} ${r.unite}`, cls }
+        return { text: `${qty(q)} ${uniteAccord(q, r.unite)}`, cls }
       } },
       { key: 'marge', label: 'Marge unitaire', sort: 'marge', align: 'num', format: (r) => (Number(r.stockable) ? money(r.marge) : '—') },
       { key: 'actif', label: 'État', badge: (r) => (Number(r.actif) ? null : { text: 'Masqué en caisse', cls: '' }), format: () => '' },
@@ -50,13 +51,14 @@ export const resources = {
     title: 'Catégories', singular: 'catégorie', subtitle: 'Classement du catalogue et des boutons de la caisse',
     searchPlaceholder: 'Rechercher une catégorie…',
     columns: [
-      { key: 'nom', label: 'Nom', sort: 'nom', cls: 'strong' },
+      { key: 'nom', label: 'Nom', sort: 'nom', cls: 'strong', thumb: (r) => (r.image ? fileUrl('categories', r.image) : '') },
       { key: 'nb_produits', label: 'Produits', align: 'num', format: (r) => r.nb_produits },
       { key: 'ordre', label: 'Ordre', sort: 'ordre', align: 'num', format: (r) => r.ordre },
     ],
     fields: [
       { name: 'nom', label: 'Nom', type: 'text', required: true, full: true },
       { name: 'ordre', label: 'Ordre d\'affichage', type: 'number', step: '1', default: () => 0 },
+      { name: 'image', label: 'Photo de la catégorie (tuile de la caisse)', type: 'file', dir: 'categories', accept: '.jpg,.jpeg,.png,.webp', full: true },
     ],
   },
 
@@ -143,6 +145,7 @@ export const resources = {
 
   utilisateurs: {
     pk: 'id_user', deleteLabel: 'Désactiver', needsLookups: true,
+    rowActions: [{ icon: 'user', label: 'Carte virtuelle', to: (r) => `/carte/${r.id_user}` }],
     title: 'Utilisateurs', singular: 'utilisateur', subtitle: 'Comptes et rôles : caissier, magasinier, gérant',
     searchPlaceholder: 'Nom ou e-mail…',
     columns: [
@@ -159,6 +162,7 @@ export const resources = {
       { name: 'gpe', label: 'Rôle', type: 'select', required: true, options: (l) => l.groupes.map((g) => ({ value: g.id, label: ({ admin: 'Gérant', caissier: 'Caissier', magasinier: 'Magasinier', superadmin: 'Super administrateur' })[g.nom] || g.nom })) },
       { name: 'pass', label: 'Mot de passe', type: 'password', requiredOnCreate: true, editHint: 'Laissez vide pour conserver le mot de passe actuel.' },
       { name: 'user_status', label: 'Compte actif', type: 'select', default: () => 1, options: () => oui },
+      { name: 'photo_user', label: 'Photo (carte virtuelle)', type: 'file', dir: 'utilisateurs', accept: '.jpg,.jpeg,.png,.webp', full: true },
     ],
   },
 }

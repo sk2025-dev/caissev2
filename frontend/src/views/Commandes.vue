@@ -7,6 +7,7 @@ import { money, qty, dateHeure, number } from '../format'
 import { STATUTS, libelleStatut, finale, suivante, datePrevue, enRetard } from '../commandes'
 import { toast } from '../toast'
 import Icon from '../components/Icon.vue'
+import SearchSelect from '../components/SearchSelect.vue'
 import Pager from '../components/Pager.vue'
 import CommandeForm from '../components/CommandeForm.vue'
 import FicheLivraison from '../components/FicheLivraison.vue'
@@ -43,11 +44,12 @@ onBeforeUnmount(() => clearTimeout(timer))
 
 /* ---- Création ---- */
 const creation = ref(false)
-async function creee(c) { creation.value = false; await load(); detail.value = c }
+async function creee(c) { creation.value = false; detail.value = c; ticketCommande.value = c; await load() }
 
 /* ---- Détail et étapes ---- */
 const detail = ref(null)
 const vente = ref(null)
+const ticketCommande = ref(null)
 async function voir(r) { try { detail.value = (await api.get('commande', { id: r.idcommande })).commande } catch (e) { toast(e.message, 'error') } }
 const busy = ref(false)
 const livreur = ref('')
@@ -98,7 +100,7 @@ async function livrer() {
   pay.busy = true; pay.erreur = ''
   try {
     const res = await api.post('commande-livrer', { idcommande: detail.value.idcommande, receptionnaire: pay.receptionnaire, observations: pay.observations, paiements: pay.lignes.filter((l) => Number(l.montant) > 0).map((l) => ({ mode: l.mode, montant: Number(l.montant), reference: l.reference })) })
-    detail.value = res.commande; vente.value = res.vente; pay.ouvert = false
+    detail.value = res.commande; ticketCommande.value = null; vente.value = res.vente; pay.ouvert = false
     toast(`${detail.value.mode === 'livraison' ? 'Livraison' : 'Retrait'} enregistré — vente ${res.vente.numero}`); load()
   } catch (e) {
     if (!(e instanceof ApiError)) throw e
@@ -125,8 +127,8 @@ const nomEtape = (s) => ({ ...{ livree: detail.value?.mode === 'retrait' ? 'Reti
       </div>
       <div class="toolbar">
         <div class="search"><Icon name="search" :size="16" /><input v-model="f.q" class="input" type="search" placeholder="N°, client, téléphone, adresse…" aria-label="Rechercher une commande" /></div>
-        <select v-model="f.mode" class="input filter" aria-label="Mode"><option value="">Livraisons et retraits</option><option value="livraison">Livraisons</option><option value="retrait">Retraits</option></select>
-        <select v-model="f.zone" class="input filter" aria-label="Zone de livraison"><option value="">Toutes les zones</option><option value="abidjan">Abidjan</option><option value="interieur">Intérieur du pays</option><option value="exterieur">Extérieur</option></select>
+        <SearchSelect v-model="f.mode" class="filter" label="Mode" :options="[{ value: '', label: 'Livraisons et retraits' }, { value: 'livraison', label: 'Livraisons' }, { value: 'retrait', label: 'Retraits' }]" />
+        <SearchSelect v-model="f.zone" class="filter" label="Zone de livraison" :options="[{ value: '', label: 'Toutes les zones' }, { value: 'abidjan', label: 'Abidjan' }, { value: 'interieur', label: 'Intérieur du pays' }, { value: 'exterieur', label: 'Extérieur' }]" />
       </div>
 
       <div v-if="error" class="empty"><div class="alert" style="display:inline-block">{{ error }}</div><div style="margin-top:12px"><button class="btn" @click="load">Réessayer</button></div></div>
@@ -190,13 +192,14 @@ const nomEtape = (s) => ({ ...{ livree: detail.value?.mode === 'retrait' ? 'Reti
 
         <div class="row">
           <button class="btn" @click="detail = null; vente = null">Fermer</button>
+          <button class="btn" @click="ticketCommande = detail"><Icon name="printer" :size="16" /> Ticket de commande</button>
           <button class="btn" @click="imprimer"><Icon name="printer" :size="16" /> {{ detail.mode === 'livraison' ? 'Fiche de livraison' : 'Bon de retrait' }}</button>
           <button v-if="peutCreer && !finale(detail)" class="btn danger" @click="Object.assign(annul, { ouvert: true, motif: '', erreur: '' })">Annuler</button>
           <button v-if="action && (action.statut === 'livree' ? peutEncaisser : peutStatut)" class="btn primary" :disabled="busy" @click="principale"><Icon :name="action.statut === 'livree' ? 'cash' : 'check'" :size="16" /> {{ chercherLivreur && action.statut === 'en_livraison' ? 'Confirmer le départ' : action.libelle }}</button>
         </div>
         <p v-if="action?.statut === 'livree' && !peutEncaisser" class="muted" style="margin:8px 0 0;font-size:13px">L'encaissement se fait par un caissier ou le gérant.</p>
 
-        <FicheLivraison v-if="!vente" :commande="detail" />
+        <FicheLivraison v-if="!vente && !ticketCommande" :commande="detail" />
       </div>
     </div>
 
@@ -204,7 +207,7 @@ const nomEtape = (s) => ({ ...{ livree: detail.value?.mode === 'retrait' ? 'Reti
     <div v-if="annul.ouvert" class="overlay center" style="z-index:70" @click.self="annul.ouvert = false" @keydown.esc.stop="annul.ouvert = false">
       <form class="modal" novalidate @submit.prevent="annuler">
         <h3>Annuler la commande {{ detail.numero }} ?</h3>
-        <p class="muted">Aucun stock n'a été sorti : rien à remettre en rayon.</p>
+        <p class="muted">{{ Number(detail.stock_debite) ? 'Les articles déduits à la prise de commande seront automatiquement remis en stock.' : 'Aucun article n’a encore été déduit du stock pour cette commande.' }}</p>
         <div class="field" :class="{ invalid: annul.erreur }"><label for="a-m">Motif <span class="req">*</span></label><input id="a-m" v-model="annul.motif" class="input" maxlength="200" autofocus /><span v-if="annul.erreur" class="error">{{ annul.erreur }}</span></div>
         <div class="row"><button type="button" class="btn" @click="annul.ouvert = false">Retour</button><button class="btn danger" :disabled="annul.busy">{{ annul.busy ? 'Annulation…' : 'Annuler la commande' }}</button></div>
       </form>
@@ -238,10 +241,10 @@ const nomEtape = (s) => ({ ...{ livree: detail.value?.mode === 'retrait' ? 'Reti
     </div>
 
     <!-- ===== Ticket de la vente créée ===== -->
-    <div v-if="vente" class="overlay center" style="z-index:80" @click.self="vente = null">
+    <div v-if="vente || ticketCommande" class="overlay center" style="z-index:80" @click.self="vente = null; ticketCommande = null" @keydown.esc.stop="vente = null; ticketCommande = null">
       <div class="modal" style="width:min(460px,calc(100% - 32px));max-height:calc(100vh - 32px);display:flex;flex-direction:column">
-        <div style="overflow-y:auto;background:var(--surface-2);border-radius:16px;padding:4px"><Ticket :vente="vente" /></div>
-        <div class="row"><button class="btn" @click="vente = null">Fermer</button><button class="btn primary" @click="imprimer"><Icon name="printer" :size="16" /> Imprimer le ticket</button></div>
+        <div style="overflow-y:auto;background:var(--surface-2);border-radius:16px;padding:4px"><Ticket :vente="vente" :commande="ticketCommande" /></div>
+        <div class="row"><button class="btn" @click="vente = null; ticketCommande = null">Fermer</button><button class="btn primary" @click="imprimer"><Icon name="printer" :size="16" /> Imprimer le ticket</button></div>
       </div>
     </div>
   </main>
@@ -259,6 +262,8 @@ const nomEtape = (s) => ({ ...{ livree: detail.value?.mode === 'retrait' ? 'Reti
 tr.cancelled td { opacity: .6; }
 
 .det { width: min(640px, calc(100% - 24px)); max-height: calc(100vh - 24px); overflow-y: auto; }
+.det > .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); }
+.det > .row > .btn { min-height: 44px; }
 .det > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .det h3 { margin: 0; } .badge.lg { font-size: 14px; padding: 6px 14px; }
 .etapes { list-style: none; display: flex; margin: 18px 0; padding: 0; }

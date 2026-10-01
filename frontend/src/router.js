@@ -9,7 +9,7 @@ const routes = [
   { path: '/caisse', component: () => import('./views/Pos.vue'), meta: { title: 'Caisse', droit: 'caisse', plein: true } },
   { path: '/ventes', component: () => import('./views/Ventes.vue'), meta: { title: 'Ventes', droit: ['caisse', 'ventes_toutes'] } },
   { path: '/commandes', component: () => import('./views/Commandes.vue'), meta: { title: 'Commandes et livraisons', droit: 'commandes' } },
-  { path: '/mouvements', component: () => import('./views/Mouvements.vue'), meta: { title: 'Mouvements de caisse', droit: ['caisse', 'ventes_toutes'] } },
+  { path: '/mouvements', component: () => import('./views/Mouvements.vue'), meta: { title: 'Dépenses et mouvements', droit: ['caisse', 'ventes_toutes'] } },
   { path: '/sessions', component: () => import('./views/Sessions.vue'), meta: { title: 'Sessions de caisse', droit: ['caisse', 'ventes_toutes'] } },
   { path: '/produits/:id(\\d+)', component: () => import('./views/ProduitDetail.vue'), props: true, meta: { title: 'Fiche produit' } },
   page('produits', 'Produits et services'),
@@ -20,6 +20,7 @@ const routes = [
   page('fournisseurs', 'Fournisseurs', { droit: 'fournisseurs' }),
   { path: '/clients/:id(\\d+)', component: () => import('./views/ClientDetail.vue'), props: true, meta: { title: 'Fiche client' } },
   page('clients', 'Clients'),
+  { path: '/carte/:id(\\d+)?', component: () => import('./views/CarteVirtuelle.vue'), props: true, meta: { title: 'Carte virtuelle' } },
   page('caisses', 'Caisses', { admin: true }),
   page('zones-livraison', 'Tarifs de livraison', { admin: true }),
   page('utilisateurs', 'Utilisateurs', { admin: true }),
@@ -32,7 +33,7 @@ export const router = createRouter({ history: createWebHashHistory(), routes })
 const autorise = (droit) => !droit || [].concat(droit).some((d) => auth.user?.droits?.[d])
 
 // Le caissier n'a que sa caisse, ses ventes et ses sessions
-const PAGES_CAISSIER = ['/caisse', '/ventes', '/sessions', '/commandes', '/mouvements']
+const PAGES_CAISSIER = ['/caisse', '/ventes', '/sessions', '/commandes', '/mouvements', '/carte']
 
 router.beforeEach((to) => {
   if (!to.meta.public && !auth.user) return { path: '/login', query: { next: to.fullPath } }

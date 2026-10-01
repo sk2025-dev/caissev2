@@ -40,6 +40,10 @@ function config_valider($section, array $in, array $all)
             if (!in_array($mode, ['auto', 'clair', 'sombre'], true)) cfg_err('mode', 'Mode inconnu');
             $o['theme.palette'] = $pal; $o['theme.mode'] = $mode;
             break;
+        case 'documents':   // en-tête et pied de page des exports (PDF, Excel)
+            $o['documents.entete'] = cfg_texte($in, 'entete', 150, $all['documents.entete']);
+            $o['documents.pied'] = cfg_texte($in, 'pied', 300, $all['documents.pied']);
+            break;
         case 'licence':
             $debut = isset($in['debut']) ? trim((string)$in['debut']) : $all['licence.debut'];
             $duree = isset($in['duree_mois']) ? trim((string)$in['duree_mois']) : $all['licence.duree_mois'];
@@ -102,7 +106,8 @@ function config_valider($section, array $in, array $all)
             $bool = function ($k, $def) use ($in) { return array_key_exists($k, $in) ? (!empty($in[$k]) && $in[$k] !== '0' ? '1' : '0') : $def; };
             $o = ['caisse.tva_defaut' => (string)(float)$tva, 'caisse.remise_max' => (string)(float)$rem, 'caisse.ecart_tolere' => (string)(float)$ecart, 'caisse.ticket_largeur' => $larg, 'caisse.prefixe' => $pref,
                 'caisse.stock_negatif' => $bool('stock_negatif', $all['caisse.stock_negatif']), 'caisse.prix_libre' => $bool('prix_libre', $all['caisse.prix_libre']),
-                'caisse.ticket_entete' => cfg_texte($in, 'ticket_entete', 200, $all['caisse.ticket_entete']), 'caisse.ticket_pied' => cfg_texte($in, 'ticket_pied', 200, $all['caisse.ticket_pied'])];
+                'caisse.ticket_entete' => cfg_texte($in, 'ticket_entete', 1000, $all['caisse.ticket_entete']), 'caisse.ticket_pied' => cfg_texte($in, 'ticket_pied', 1000, $all['caisse.ticket_pied'])];
+            foreach (['logo', 'adresse', 'contact', 'identifiants'] as $k) $o['caisse.ticket_' . $k] = $bool('ticket_' . $k, $all['caisse.ticket_' . $k]);
             break;
         default:
             throw new ApiError(404, 'Section inconnue');
@@ -133,7 +138,7 @@ function config_complete(PDO $db)
     $alertes = settings_section($a, 'alertes'); $alertes['types'] = array_values(array_filter(explode(',', $alertes['types'])));
     $log = $db->query('SELECT * FROM mail_log ORDER BY id DESC LIMIT 8')->fetchAll(PDO::FETCH_ASSOC);
     return [
-        'entreprise' => settings_section($a, 'entreprise'), 'copyright' => settings_section($a, 'copyright'), 'theme' => settings_section($a, 'theme'),
+        'entreprise' => settings_section($a, 'entreprise'), 'copyright' => settings_section($a, 'copyright'), 'theme' => settings_section($a, 'theme'), 'documents' => settings_section($a, 'documents'),
         'licence' => settings_section($a, 'licence'), 'session' => settings_section($a, 'session'), 'mail' => $mail, 'alertes' => $alertes, 'caisse' => settings_section($a, 'caisse'),
         'licence_etat' => licence_etat($a), 'palettes' => PALETTES, 'journal_mail' => $log,
     ];

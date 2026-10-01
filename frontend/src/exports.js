@@ -47,8 +47,8 @@ export async function initExports() {
 }
 
 /** Lance un export : la réponse est immédiate, la génération se poursuit côté serveur. */
-export async function startExport({ format, kind, from, to }) {
-  const res = await api.post('export-create', { format, kind, from, to })
+export async function startExport({ format, kind, from, to, mois }) {
+  const res = await api.post('export-create', { format, kind, from, to, mois })
   known.set(res.job.id, res.job.status)
   exportsStore.jobs = [res.job, ...exportsStore.jobs.filter((j) => j.id !== res.job.id)].slice(0, 10)
   toast(kind === 'database' ? 'Sauvegarde de la base lancée — vous pouvez continuer à travailler' : `Export ${formatLabel[format]} lancé — vous pouvez continuer à travailler`, 'success')

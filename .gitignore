@@ -10,3 +10,7 @@ exports/*
 doc/logo/*
 doc/produits/*
 !doc/*/.gitkeep
+justificatifs/*
+!justificatifs/.htaccess
+doc/utilisateurs/*
+doc/categories/*

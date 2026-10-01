@@ -7,6 +7,7 @@ const props = defineProps({
   modelValue: { type: [String, Number], default: '' },
   options: { type: Array, required: true }, // [{ value, label }]
   id: String,
+  label: { type: String, default: '' },     // libellé accessible quand aucun <label for> n'est associé (filtres)
   placeholder: { type: String, default: 'Choisir…' },
   invalid: Boolean,
   createLabel: { type: String, default: '' }, // ex. « propriétaire » : active l'option « Créer … »
@@ -88,7 +89,7 @@ watch(search, () => { active.value = 0 })
   <div ref="root" class="ss" :class="{ open, invalid }">
     <input
       :id="id" ref="input" class="input ss-input" type="text" role="combobox" autocomplete="off"
-      :aria-expanded="open" :aria-controls="listId" aria-autocomplete="list"
+      :aria-expanded="open" :aria-controls="listId" aria-autocomplete="list" :aria-label="label || undefined"
       :placeholder="open ? 'Rechercher…' : placeholder"
       :value="open ? search : selected?.short ?? selected?.label ?? ''"
       @focus="show" @click="show" @input="search = $event.target.value; show()" @keydown="onKey"

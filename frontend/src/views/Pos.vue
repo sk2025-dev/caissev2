@@ -2,9 +2,10 @@
 // Écran de caisse : catalogue tactile, panier, paiements mixtes, ventes en attente, mouvements d'espèces, clôture et ticket.
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { inject } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { api, auth, fileUrl, ApiError, estCaissier, prenomDe } from '../api'
-import { lookups, loadLookups } from '../lookups'
-import { money, qty, number, dateHeure } from '../format'
+import { lookups, loadLookups, ajouterCategorieMvt } from '../lookups'
+import { money, qty, number, dateHeure, uniteAccord } from '../format'
 import { toast } from '../toast'
 import { logoUrl, nomApp } from '../theme'
 import Icon from '../components/Icon.vue'
@@ -14,6 +15,9 @@ import Ticket from '../components/Ticket.vue'
 import CommandeForm from '../components/CommandeForm.vue'
 import ZReport from '../components/ZReport.vue'
 
+const route = useRoute()
+const router = useRouter()
+
 const cat = ref({ produits: [], categories: [], modes: [] })
 const session = ref(undefined)         // undefined = chargement, null = aucune caisse ouverte
 const clients = ref([])
@@ -21,8 +25,11 @@ const erreur = ref('')
 
 /* ---------- Commande / livraison depuis le panier ---------- */
 const commande = ref(false)
+const ticketCommande = ref(null)
 function commandeCreee(c) {
   commande.value = false
+  ticketCommande.value = c
+  chargerCatalogue().catch((e) => toast(e.message, 'error'))
   if (lignes.value.length) { vider(); toast(`Commande ${c.numero} enregistrée — suivez-la dans « Commandes »`) }
 }
 
@@ -59,8 +66,18 @@ onMounted(async () => {
 onBeforeUnmount(() => document.removeEventListener('keydown', raccourcis))
 
 /* ---------- Ouverture de caisse ---------- */
-const ouverture = reactive({ idcaisse: '', fond: '0', busy: false, erreurs: {} })
-watch(() => lookups.caisses, (c) => { if (!ouverture.idcaisse && c.length) ouverture.idcaisse = c[0].id }, { immediate: true })
+const ouverture = reactive({ idcaisse: '', fond: '0', busy: false, erreurs: {}, occupees: [], motif: '' })
+// Caisses occupées par une session ouverte : affichées dans la liste, une caisse libre est proposée par défaut
+async function chargerOccupation() {
+  try { ouverture.occupees = (await api.get('caisses-occupation')).occupees } catch { ouverture.occupees = [] }
+  const libre = lookups.caisses.find((c) => !occupation(c.id))
+  if (libre && (!ouverture.idcaisse || occupation(ouverture.idcaisse))) ouverture.idcaisse = libre.id
+}
+const occupation = (idcaisse) => ouverture.occupees.find((o) => String(o.idcaisse) === String(idcaisse))
+const occupee = computed(() => occupation(ouverture.idcaisse))
+const optionsCaisses = computed(() => lookups.caisses.map((c) => { const o = occupation(c.id); return { value: c.id, label: o ? `${c.nom} — ouverte par ${o.caissier}` : c.nom, short: c.nom } }))
+watch(() => lookups.caisses, (c) => { if (!ouverture.idcaisse && c.length) ouverture.idcaisse = c[0].id; if (c.length) chargerOccupation() }, { immediate: true })
+watch(() => occupee.value?.idsession, () => { ouverture.motif = occupee.value ? `Reprise de la caisse par ${auth.user?.name || 'le gérant'}` : '' })
 async function ouvrir() {
   ouverture.busy = true; ouverture.erreurs = {}
   try {
@@ -69,8 +86,25 @@ async function ouvrir() {
     await nextTick(); recherche.value?.focus()
   } catch (e) {
     if (e instanceof ApiError && Object.keys(e.errors).length) ouverture.erreurs = e.errors
-    toast(e.message, 'error')
+    if (e instanceof ApiError && e.code === 'caisse_occupee') await chargerOccupation(); else toast(e.message, 'error')
   } finally { ouverture.busy = false }
+}
+// Gérant ou super administrateur : libère la caisse (clôture forcée, sans comptage, tracée) puis l'ouvre à son nom
+const peutLiberer = computed(() => !!occupee.value && !!auth.user?.admin && (auth.user?.super || !occupee.value.super))
+async function prendreLaMain() {
+  const o = occupee.value
+  if (!o) return
+  ouverture.busy = true; ouverture.erreurs = {}
+  try {
+    await api.post('session-forcer-cloture', { idsession: o.idsession, motif: ouverture.motif })
+    toast(`Session de ${o.caissier} clôturée`)
+    ouverture.occupees = ouverture.occupees.filter((x) => x.idsession !== o.idsession)
+  } catch (e) {
+    ouverture.busy = false
+    if (e instanceof ApiError && e.errors?.motif) ouverture.erreurs = { motif: e.errors.motif }; else toast(e.message, 'error')
+    return
+  }
+  await ouvrir()
 }
 
 /* ---------- Catalogue ---------- */
@@ -112,7 +146,7 @@ function changerQte(l, v) {
   let n = Number(v)
   if (!(n > 0)) n = l.unite === 'pièce' ? 1 : 0.001
   if (l.unite === 'pièce') n = Math.max(1, Math.round(n))
-  if (l.stockable && !lookups.reglages.stock_negatif && n > l.stock_qty) { toast(`Stock disponible : ${qty(l.stock_qty)} ${l.unite}`, 'error'); n = l.stock_qty }
+  if (l.stockable && !lookups.reglages.stock_negatif && n > l.stock_qty) { toast(`Stock disponible : ${qty(l.stock_qty)} ${uniteAccord(l.stock_qty, l.unite)}`, 'error'); n = l.stock_qty }
   l.quantite = n
 }
 const retirer = (l) => { lignes.value = lignes.value.filter((x) => x !== l) }
@@ -242,7 +276,23 @@ async function supprimerAttente(p) { try { await api.del('paniers', p.idpanier);
 /* ---------- Mouvements d'espèces ---------- */
 const mvt = reactive({ ouvert: false, type: 'sortie', montant: '', motif: '', categorie: '', reference: '', busy: false, erreurs: {} })
 function ouvrirMvt(type) { Object.assign(mvt, { ouvert: true, type, montant: '', motif: '', categorie: '', reference: '', erreurs: {} }) }
+// L'accès « Nouvelle dépense » ouvre le formulaire dès que la caisse est ouverte.
+watch(() => [route.query.depense, session.value], ([depense, courante]) => {
+  if (depense !== '1' || !courante) return
+  ouvrirMvt('sortie')
+  const { depense: _, ...query } = route.query
+  router.replace({ path: '/caisse', query })
+})
 const categoriesMvt = computed(() => Object.entries(lookups.categories_mvt?.[mvt.type] || {}))
+const peutCreerCategorie = computed(() => !!auth.user?.droits?.depenses)
+async function creerCategorieMvt(libelle) {
+  if (!libelle) return toast('Tapez le nom de la nouvelle catégorie dans la liste, puis choisissez « Créer ».', 'error')
+  try {
+    const c = await ajouterCategorieMvt(mvt.type, libelle)
+    mvt.categorie = c.code
+    toast(c.existait ? `La catégorie « ${c.libelle} » existait déjà : elle est sélectionnée.` : `Catégorie « ${c.libelle} » ajoutée`)
+  } catch (e) { toast(e.errors?.libelle || e.message, 'error') }
+}
 async function enregistrerMvt() {
   mvt.busy = true; mvt.erreurs = {}
   try {
@@ -277,7 +327,7 @@ function finCloture() { clo.ouvert = false; clo.final = null }
 
 /* ---------- Raccourcis clavier ---------- */
 function raccourcis(e) {
-  if (!session.value) return
+  if (!session.value || ticketCommande.value) return
   if (e.key === 'F2') { e.preventDefault(); recherche.value?.focus() }
   else if (e.key === 'F4') { e.preventDefault(); if (!paiement.ouvert && !ticket.value) ouvrirPaiement() }
   else if (e.key === 'F8') { e.preventDefault(); mettreEnAttente() }
@@ -298,15 +348,25 @@ function raccourcis(e) {
       <p class="muted">Comptez le fond de caisse présent dans le tiroir avant de commencer.</p>
       <div class="field" :class="{ invalid: ouverture.erreurs.idcaisse }">
         <label for="o-c">Caisse</label>
-        <SearchSelect id="o-c" v-model="ouverture.idcaisse" :options="lookups.caisses.map((c) => ({ value: c.id, label: c.nom }))" />
+        <SearchSelect id="o-c" v-model="ouverture.idcaisse" :options="optionsCaisses" />
         <span v-if="ouverture.erreurs.idcaisse" class="error">{{ ouverture.erreurs.idcaisse }}</span>
+      </div>
+      <div v-if="occupee" class="occupee" role="alert">
+        <p><Icon name="alert" :size="16" /> <span>Cette caisse est déjà ouverte par <b>{{ occupee.caissier }}</b> depuis le {{ dateHeure(occupee.ouverture_at) }}.</span></p>
+        <template v-if="peutLiberer">
+          <p class="muted">Vous pouvez la libérer : sa session sera clôturée sans comptage des espèces (tracé dans le journal d'audit), puis la caisse s'ouvrira à votre nom.</p>
+          <div class="field" :class="{ invalid: ouverture.erreurs.motif }"><label for="o-m">Motif</label><input id="o-m" v-model="ouverture.motif" class="input" maxlength="200" /><span v-if="ouverture.erreurs.motif" class="error">{{ ouverture.erreurs.motif }}</span></div>
+          <button class="btn strong" :disabled="ouverture.busy" @click="prendreLaMain"><Icon name="lock" :size="16" /> Libérer et prendre la main</button>
+        </template>
+        <p v-else-if="occupee.super" class="muted">Cette caisse est tenue par le super administrateur : choisissez une autre caisse ou demandez-lui de la clôturer.</p>
+        <p v-else class="muted">Choisissez une autre caisse, demandez à {{ occupee.caissier }} de clôturer sa session, ou au gérant de la libérer (Sessions de caisse → cadenas).</p>
       </div>
       <div class="field" :class="{ invalid: ouverture.erreurs.fond_initial }">
         <label for="o-f">Fond de caisse (espèces)</label>
         <input id="o-f" v-model="ouverture.fond" class="input big" type="number" min="0" step="1" inputmode="numeric" @keydown.enter="ouvrir" />
         <span v-if="ouverture.erreurs.fond_initial" class="error">{{ ouverture.erreurs.fond_initial }}</span>
       </div>
-      <button class="btn primary lg" :disabled="ouverture.busy" @click="ouvrir"><Icon name="play" :size="18" /> {{ ouverture.busy ? 'Ouverture…' : 'Ouvrir la caisse' }}</button>
+      <button v-if="!occupee" class="btn primary lg" :disabled="ouverture.busy" @click="ouvrir"><Icon name="play" :size="18" /> {{ ouverture.busy ? 'Ouverture…' : 'Ouvrir la caisse' }}</button>
     </section>
 
     <!-- ===== Caisse ouverte : terminal plein écran (panier à gauche, catalogue illustré à droite) ===== -->
@@ -368,7 +428,7 @@ function raccourcis(e) {
           <button @click="panneauAttente = true"><Icon name="pause" :size="24" /><span>En attente<i v-if="paniers.length" class="n">{{ paniers.length }}</i></span></button>
           <button title="Prendre une commande ou une livraison" @click="commande = true"><Icon name="truck" :size="24" /><span>Commande</span></button>
           <button @click="ouvrirMvt('entree')"><Icon name="plus" :size="24" /><span>Entrée</span></button>
-          <button @click="ouvrirMvt('sortie')"><Icon name="minus" :size="24" /><span>Sortie</span></button>
+          <button title="Enregistrer une dépense ou une sortie d’espèces" @click="ouvrirMvt('sortie')"><Icon name="minus" :size="24" /><span>Dépense</span></button>
           <button class="danger" @click="ouvrirCloture"><Icon name="lock" :size="24" /><span>Clôturer</span></button>
         </div>
       </aside>
@@ -387,7 +447,8 @@ function raccourcis(e) {
         <div class="cats" role="tablist" aria-label="Catégories">
           <button class="cat-tile" :class="{ on: !catSel }" role="tab" :aria-selected="!catSel" style="--c: var(--primary)" @click="catSel = null"><span>Tout</span></button>
           <button v-for="c in cat.categories" :key="c.id" class="cat-tile" :class="{ on: catSel === c.id }" role="tab" :aria-selected="catSel === c.id" :style="{ '--c': teinte(c) }" @click="catSel = catSel === c.id ? null : c.id">
-            <img v-if="vignette(c.id)" :src="fileUrl('produits', vignette(c.id))" alt="" loading="lazy" />
+            <img v-if="c.image" :src="fileUrl('categories', c.image)" alt="" loading="lazy" />
+            <img v-else-if="vignette(c.id)" :src="fileUrl('produits', vignette(c.id))" alt="" loading="lazy" />
             <span>{{ c.nom }}</span>
           </button>
         </div>
@@ -401,7 +462,7 @@ function raccourcis(e) {
               <span class="price">{{ money(p.prix_vente) }}</span>
               <span v-if="p.type === 'service'" class="stk svc">Service</span>
               <span v-else-if="stockEtat(p) === 'rupture'" class="stk bad">Rupture</span>
-              <span v-else class="stk" :class="{ low: stockEtat(p) === 'bas' }">{{ qty(p.stock_qty) }} {{ p.unite }}</span>
+              <span v-else class="stk" :class="{ low: stockEtat(p) === 'bas' }">{{ qty(p.stock_qty) }} {{ uniteAccord(p.stock_qty, p.unite) }}</span>
               <b class="nom">{{ p.nom }}</b>
               <span v-if="lignes.find((l) => l.idprod === p.id)" class="in-cart">{{ qty(lignes.find((l) => l.idprod === p.id).quantite) }}</span>
             </button>
@@ -417,7 +478,7 @@ function raccourcis(e) {
           <div class="d-head"><b>{{ nomApp }}</b><span>{{ auth.user.name }}</span></div>
           <RouterLink to="/ventes" @click="menu = false"><Icon name="receipt" :size="20" /> Ventes</RouterLink>
           <RouterLink to="/commandes" @click="menu = false"><Icon name="truck" :size="20" /> Commandes et livraisons</RouterLink>
-          <RouterLink to="/mouvements" @click="menu = false"><Icon name="swap" :size="20" /> Mouvements de caisse</RouterLink>
+          <RouterLink to="/mouvements" @click="menu = false"><Icon name="swap" :size="20" /> Dépenses et mouvements</RouterLink>
           <RouterLink to="/sessions" @click="menu = false"><Icon name="cash" :size="20" /> Sessions de caisse</RouterLink>
           <RouterLink v-if="!kiosque" to="/" @click="menu = false"><Icon name="dashboard" :size="20" /> Quitter la caisse</RouterLink>
           <button @click="menu = false; deconnecter && deconnecter()"><Icon name="logout" :size="20" /> Se déconnecter</button>
@@ -462,13 +523,14 @@ function raccourcis(e) {
     </div>
 
     <!-- ===== Ticket ===== -->
-    <div v-if="ticket" class="overlay center">
-      <div class="modal ticket-modal" role="dialog" aria-modal="true" aria-label="Vente enregistrée">
-        <div class="done"><span class="ok"><Icon name="check" :size="26" /></span><div><h3>Vente enregistrée</h3><p v-if="Number(ticket.rendu) > 0" class="change-big">Rendre {{ money(ticket.rendu) }}</p></div></div>
-        <div class="ticket-scroll"><Ticket :vente="ticket" /></div>
+    <div v-if="ticket || ticketCommande" class="overlay center">
+      <div class="modal ticket-modal" role="dialog" aria-modal="true" :aria-label="ticketCommande ? 'Commande enregistrée' : 'Vente enregistrée'">
+        <div class="done"><span class="ok"><Icon name="check" :size="26" /></span><div><h3>{{ ticketCommande ? 'Commande enregistrée' : 'Vente enregistrée' }}</h3><p v-if="ticket && Number(ticket.rendu) > 0" class="change-big">Rendre {{ money(ticket.rendu) }}</p></div></div>
+        <div class="ticket-scroll"><Ticket :vente="ticket" :commande="ticketCommande" /></div>
         <div class="row">
           <button class="btn" @click="imprimer"><Icon name="printer" :size="16" /> Imprimer</button>
-          <button class="btn primary lg" autofocus @click="nouvelleVente"><Icon name="plus" :size="16" /> Nouvelle vente</button>
+          <button v-if="ticketCommande" class="btn primary lg" @click="ticketCommande = null">Fermer</button>
+          <button v-else class="btn primary lg" autofocus @click="nouvelleVente"><Icon name="plus" :size="16" /> Nouvelle vente</button>
         </div>
       </div>
     </div>
@@ -492,12 +554,12 @@ function raccourcis(e) {
 
     <!-- ===== Entrée / sortie d'espèces ===== -->
     <div v-if="mvt.ouvert" class="overlay center" @click.self="mvt.ouvert = false" @keydown.esc="mvt.ouvert = false">
-      <form class="modal" novalidate role="dialog" aria-modal="true" :aria-label="mvt.type === 'sortie' ? 'Sortie de caisse' : 'Entrée de caisse'" @submit.prevent="enregistrerMvt">
-        <h3>{{ mvt.type === 'sortie' ? 'Sortie d\'espèces' : 'Entrée d\'espèces' }}</h3>
+      <form class="modal" novalidate role="dialog" aria-modal="true" :aria-label="mvt.type === 'sortie' ? 'Nouvelle dépense' : 'Entrée de caisse'" @submit.prevent="enregistrerMvt">
+        <h3>{{ mvt.type === 'sortie' ? 'Nouvelle dépense / sortie de caisse' : 'Entrée d\'espèces' }}</h3>
         <p class="muted">{{ mvt.type === 'sortie' ? 'Dépense payée avec le tiroir-caisse, retrait, dépôt en banque…' : 'Apport de monnaie, fonds ajoutés au tiroir…' }}</p>
         <div style="display:flex;flex-direction:column;gap:14px;margin-top:14px">
           <div class="field" :class="{ invalid: mvt.erreurs.montant }"><label for="m-mt">Montant</label><input id="m-mt" v-model="mvt.montant" class="input" type="number" min="1" inputmode="numeric" autofocus /><span v-if="mvt.erreurs.montant" class="error">{{ mvt.erreurs.montant }}</span></div>
-          <div class="field" :class="{ invalid: mvt.erreurs.categorie }"><label for="m-cat">Catégorie <span class="req">*</span></label><select id="m-cat" v-model="mvt.categorie" class="input"><option value="" disabled>Choisir…</option><option v-for="[code, lib] in categoriesMvt" :key="code" :value="code">{{ lib }}</option></select><span v-if="mvt.erreurs.categorie" class="error">{{ mvt.erreurs.categorie }}</span></div>
+          <div class="field" :class="{ invalid: mvt.erreurs.categorie }"><label for="m-cat">Catégorie <span class="req">*</span></label><SearchSelect id="m-cat" v-model="mvt.categorie" :options="categoriesMvt.map(([code, lib]) => ({ value: code, label: lib }))" placeholder="Choisir…" :invalid="!!mvt.erreurs.categorie" :create-label="peutCreerCategorie ? 'catégorie' : ''" @create="creerCategorieMvt" /><span v-if="mvt.erreurs.categorie" class="error">{{ mvt.erreurs.categorie }}</span></div>
           <div class="field" :class="{ invalid: mvt.erreurs.motif }"><label for="m-mo">Libellé / motif <span class="req">*</span></label><input id="m-mo" v-model="mvt.motif" class="input" maxlength="200" placeholder="Ex. achat de sachets" /><span v-if="mvt.erreurs.motif" class="error">{{ mvt.erreurs.motif }}</span></div>
           <div class="field"><label for="m-ref">N° de justificatif (facture, reçu…)</label><input id="m-ref" v-model="mvt.reference" class="input" maxlength="80" placeholder="Facultatif" /></div>
         </div>
@@ -542,6 +604,9 @@ function raccourcis(e) {
 .pos-page { max-width: none; }
 .open-card { max-width: 440px; margin: 6vh auto; padding: 34px; display: flex; flex-direction: column; gap: 16px; text-align: center; }
 .open-card .field { text-align: left; }
+.occupee { text-align: left; display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: 16px; background: var(--warning-soft); border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); }
+.occupee p { margin: 0; font-size: 14px; } .occupee p:first-child { display: flex; gap: 8px; align-items: flex-start; } .occupee p:first-child svg { color: var(--warning); flex: none; margin-top: 2px; }
+.occupee .btn { align-self: stretch; justify-content: center; }
 .open-ico { width: 68px; height: 68px; margin: 0 auto; border-radius: 22px; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 55%, #fff)); box-shadow: 0 14px 30px color-mix(in srgb, var(--primary) 40%, transparent); }
 .btn.lg { padding: 14px 22px; font-size: 16px; border-radius: 16px; }
 .input.big { font-size: 22px; font-weight: 700; padding: 12px 14px; }

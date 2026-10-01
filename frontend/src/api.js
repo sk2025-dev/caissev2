@@ -2,6 +2,7 @@ import { reactive } from 'vue'
 import { showSplash } from './splash'
 
 const BASE = import.meta.env.DEV ? '/api/index.php' : '../api/index.php'
+export const justificatifUrl = (idop) => `${BASE}?r=justificatif&id=${idop}`
 
 export const auth = reactive({ user: null, ready: false, notice: '' })
 

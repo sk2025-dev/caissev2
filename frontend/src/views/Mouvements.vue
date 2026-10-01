@@ -2,16 +2,19 @@
 // État des mouvements d'espèces (entrées / sorties de caisse) : journal numéroté, synthèse par catégorie et par jour,
 // état imprimable signé et export comptable (Excel, CSV, PDF).
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { api, auth } from '../api'
-import { lookups, loadLookups } from '../lookups'
+import { api, auth, ApiError, justificatifUrl } from '../api'
+import { lookups, loadLookups, ajouterCategorieMvt } from '../lookups'
 import { money, dateHeure, date, today } from '../format'
 import { logoUrl, nomApp } from '../theme'
 import { toast } from '../toast'
 import Icon from '../components/Icon.vue'
+import SearchSelect from '../components/SearchSelect.vue'
 import Pager from '../components/Pager.vue'
 import ExportButtons from '../components/ExportButtons.vue'
+import FileDrop from '../components/FileDrop.vue'
 
 const gerant = computed(() => !!auth.user?.droits?.ventes_toutes)
+const peutDepenser = computed(() => !!auth.user?.droits?.depenses)
 const debutMois = () => `${today().slice(0, 8)}01`
 const f = reactive({ from: debutMois(), to: today(), type: '', categorie: '', idcaisse: '', iduser: '', q: '', page: 1 })
 const rows = ref([])
@@ -59,14 +62,42 @@ async function imprimerEtat() {
 }
 const entrees = (l) => l.filter((c) => c.type === 'entree')
 const sorties = (l) => l.filter((c) => c.type === 'sortie')
+/* ---- Dépense hors caisse (gérant) : réglée par le coffre, la banque ou le mobile money, sans session de caisse ---- */
+const dep = reactive({ ouvert: false, busy: false, erreurs: {}, date: '', montant: '', categorie: '', source: '', motif: '', reference: '', fichier: null })
+const ouvrirDepense = () => Object.assign(dep, { ouvert: true, erreurs: {}, date: today(), montant: '', categorie: '', source: 'coffre', motif: '', reference: '', fichier: null })
+const optionsSources = computed(() => Object.entries(lookups.sources_depense).map(([value, label]) => ({ value, label })))
+const optionsCategoriesDep = computed(() => Object.entries(lookups.categories_mvt.sortie || {}).map(([value, label]) => ({ value, label })))
+async function creerCategorie(libelle) {
+  if (!libelle) return toast('Tapez le nom de la nouvelle catégorie dans la liste, puis choisissez « Créer ».', 'error')
+  try {
+    const c = await ajouterCategorieMvt('sortie', libelle)
+    dep.categorie = c.code; dep.erreurs.categorie = ''
+    toast(c.existait ? `La catégorie « ${c.libelle} » existait déjà : elle est sélectionnée.` : `Catégorie « ${c.libelle} » ajoutée`)
+  } catch (e) { toast(e.errors?.libelle || e.message, 'error') }
+}
+async function enregistrerDepense() {
+  dep.busy = true; dep.erreurs = {}
+  try {
+    const fd = new FormData()
+    for (const k of ['date', 'montant', 'categorie', 'source', 'motif', 'reference']) fd.append(k, dep[k] ?? '')
+    if (dep.fichier) fd.append('justificatif', dep.fichier)
+    const res = await api.post('depense-creer', fd)
+    toast(`Dépense enregistrée — pièce ${res.operation.numero}`); dep.ouvert = false; load()
+  } catch (e) {
+    if (e instanceof ApiError && Object.keys(e.errors).length) dep.erreurs = e.errors; else toast(e.message, 'error')
+  } finally { dep.busy = false }
+}
+
 const edite = new Date().toISOString().slice(0, 19).replace('T', ' ')
 </script>
 
 <template>
   <main class="page">
     <div class="page-head">
-      <div><h1>Mouvements de caisse</h1><p>{{ gerant ? 'Entrées et sorties d\'espèces de toutes les caisses' : 'Vos entrées et sorties d\'espèces' }} — pièces numérotées, classées par catégorie.</p></div>
+      <div><h1>Dépenses et mouvements de caisse</h1><p>{{ gerant ? 'Entrées et sorties d\'espèces de toutes les caisses, et dépenses réglées hors caisse' : 'Vos entrées et sorties d\'espèces' }} — pièces numérotées, classées par catégorie.</p></div>
       <div class="head-actions">
+        <button v-if="peutDepenser" class="btn primary" @click="ouvrirDepense"><Icon name="minus" :size="16" /> Nouvelle dépense</button>
+        <RouterLink v-if="auth.user?.droits?.caisse" to="/caisse?depense=1" class="btn" :class="{ primary: !peutDepenser }"><Icon name="minus" :size="16" /> {{ peutDepenser ? 'Sortie de caisse' : 'Nouvelle dépense' }}</RouterLink>
         <button class="btn" :disabled="!totaux.nb" @click="imprimerEtat"><Icon name="printer" :size="16" /> Imprimer l'état</button>
         <ExportButtons v-if="gerant" kind="mouvements" :from="f.from" :to="f.to" />
       </div>
@@ -103,10 +134,10 @@ const edite = new Date().toISOString().slice(0, 19).replace('T', ' ')
       <div class="toolbar">
         <div class="search"><Icon name="search" :size="16" /><input v-model="f.q" class="input" type="search" placeholder="N° de pièce, libellé, justificatif…" aria-label="Rechercher un mouvement" /></div>
         <input v-model="f.from" class="input date" type="date" aria-label="Du" /><input v-model="f.to" class="input date" type="date" aria-label="Au" />
-        <select v-model="f.type" class="input filter" aria-label="Sens"><option value="">Entrées et sorties</option><option value="entree">Entrées</option><option value="sortie">Sorties</option></select>
-        <select v-model="f.categorie" class="input filter" aria-label="Catégorie"><option value="">Toutes les catégories</option><option v-for="[c, l] in categoriesFiltre" :key="c" :value="c">{{ l }}</option></select>
-        <select v-if="lookups.caisses.length > 1" v-model="f.idcaisse" class="input filter" aria-label="Caisse"><option value="">Toutes les caisses</option><option v-for="c in lookups.caisses" :key="c.id" :value="c.id">{{ c.nom }}</option></select>
-        <select v-if="gerant" v-model="f.iduser" class="input filter" aria-label="Saisi par"><option value="">Tous les utilisateurs</option><option v-for="c in lookups.caissiers" :key="c.id" :value="c.id">{{ c.nom }}</option></select>
+        <SearchSelect v-model="f.type" class="filter" label="Sens" :options="[{ value: '', label: 'Entrées et sorties' }, { value: 'entree', label: 'Entrées' }, { value: 'sortie', label: 'Sorties' }]" />
+        <SearchSelect v-model="f.categorie" class="filter" label="Catégorie" :options="[{ value: '', label: 'Toutes les catégories' }, ...categoriesFiltre.map(([c, l]) => ({ value: c, label: l }))]" />
+        <SearchSelect v-if="lookups.caisses.length > 1 || gerant" v-model="f.idcaisse" class="filter" label="Caisse" :options="[{ value: '', label: 'Toutes les caisses' }, ...lookups.caisses.map((c) => ({ value: c.id, label: c.nom })), ...(gerant ? [{ value: 'hors', label: 'Hors caisse (gérant)' }] : [])]" />
+        <SearchSelect v-if="gerant" v-model="f.iduser" class="filter" label="Saisi par" :options="[{ value: '', label: 'Tous les utilisateurs' }, ...lookups.caissiers.map((c) => ({ value: c.id, label: c.nom }))]" />
       </div>
 
       <div v-if="error" class="empty"><div class="alert" style="display:inline-block">{{ error }}</div><div style="margin-top:12px"><button class="btn" @click="load">Réessayer</button></div></div>
@@ -118,7 +149,7 @@ const edite = new Date().toISOString().slice(0, 19).replace('T', ' ')
             <tr v-for="r in rows" :key="r.idop">
               <td data-label="N° pièce" class="mono strong">{{ r.numero }}</td>
               <td data-label="Date">{{ dateHeure(r.created_at) }}</td>
-              <td data-label="Libellé"><b>{{ r.categorie_libelle }}</b><small class="sub">{{ r.motif }}<template v-if="r.reference"> · Justif. {{ r.reference }}</template></small></td>
+              <td data-label="Libellé"><b>{{ r.categorie_libelle }}</b><small class="sub">{{ r.motif }}<template v-if="r.reference"> · Justif. {{ r.reference }}</template></small><a v-if="r.a_justificatif" :href="justificatifUrl(r.idop)" target="_blank" rel="noopener" class="pj"><Icon name="file" :size="14" /> Voir le justificatif</a></td>
               <td data-label="Caisse">{{ r.caisse }}</td>
               <td data-label="Saisi par">{{ r.auteur }}</td>
               <td data-label="Entrée" class="num in">{{ r.type === 'entree' ? money(r.montant) : '' }}</td>
@@ -130,6 +161,25 @@ const edite = new Date().toISOString().slice(0, 19).replace('T', ' ')
         <div v-else class="empty"><Icon name="swap" :size="40" /><div>Aucun mouvement pour ces critères.</div></div>
       </div>
       <Pager :meta="meta" @goto="(p) => { f.page = p; load() }" />
+    </div>
+
+    <div v-if="dep.ouvert" class="overlay center" style="overflow-y:auto;padding:16px 0" @click.self="dep.ouvert = false" @keydown.esc="dep.ouvert = false">
+      <form class="modal" style="width:min(520px,calc(100% - 32px))" novalidate role="dialog" aria-modal="true" aria-label="Nouvelle dépense" @submit.prevent="enregistrerDepense">
+        <h3>Nouvelle dépense</h3>
+        <p class="muted">Dépense réglée hors du tiroir-caisse : elle ne modifie pas le comptage des caisses.</p>
+        <div style="display:flex;flex-direction:column;gap:14px;margin-top:14px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="field" :class="{ invalid: dep.erreurs.date }"><label for="d-date">Date</label><input id="d-date" v-model="dep.date" class="input" type="date" :max="today()" /><span v-if="dep.erreurs.date" class="error">{{ dep.erreurs.date }}</span></div>
+            <div class="field" :class="{ invalid: dep.erreurs.montant }"><label for="d-mt">Montant <span class="req">*</span></label><input id="d-mt" v-model="dep.montant" class="input" type="number" min="1" inputmode="numeric" autofocus /><span v-if="dep.erreurs.montant" class="error">{{ dep.erreurs.montant }}</span></div>
+          </div>
+          <div class="field" :class="{ invalid: dep.erreurs.source }"><label for="d-src">Réglée par <span class="req">*</span></label><SearchSelect id="d-src" v-model="dep.source" :options="optionsSources" :invalid="!!dep.erreurs.source" /><span v-if="dep.erreurs.source" class="error">{{ dep.erreurs.source }}</span></div>
+          <div class="field" :class="{ invalid: dep.erreurs.categorie }"><label for="d-cat">Catégorie <span class="req">*</span></label><SearchSelect id="d-cat" v-model="dep.categorie" :options="optionsCategoriesDep" placeholder="Choisir ou créer…" create-label="catégorie" :invalid="!!dep.erreurs.categorie" @create="creerCategorie" /><span v-if="dep.erreurs.categorie" class="error">{{ dep.erreurs.categorie }}</span><small class="hint">Introuvable ? Tapez son nom puis « Créer ».</small></div>
+          <div class="field" :class="{ invalid: dep.erreurs.motif }"><label for="d-mo">Libellé / motif <span class="req">*</span></label><input id="d-mo" v-model="dep.motif" class="input" maxlength="200" placeholder="Ex. facture d'électricité de septembre" /><span v-if="dep.erreurs.motif" class="error">{{ dep.erreurs.motif }}</span></div>
+          <div class="field"><label for="d-ref">N° de justificatif (facture, reçu…)</label><input id="d-ref" v-model="dep.reference" class="input" maxlength="80" placeholder="Facultatif" /></div>
+          <div class="field" :class="{ invalid: dep.erreurs.justificatif }"><label for="d-pj">Pièce justificative <small class="muted" style="font-weight:400">(facultatif — PDF ou photo, 5 Mo max.)</small></label><FileDrop id="d-pj" v-model="dep.fichier" accept=".pdf,.jpg,.jpeg,.png,.webp" :max-mb="5" :invalid="!!dep.erreurs.justificatif" /><span v-if="dep.erreurs.justificatif" class="error">{{ dep.erreurs.justificatif }}</span></div>
+        </div>
+        <div class="row"><button type="button" class="btn" @click="dep.ouvert = false">Annuler</button><button class="btn primary" :disabled="dep.busy">Enregistrer</button></div>
+      </form>
     </div>
 
     <!-- État imprimable : toute la période, présentation comptable (entrées / sorties en colonnes) -->
@@ -167,6 +217,7 @@ const edite = new Date().toISOString().slice(0, 19).replace('T', ' ')
 .empty.small { padding: 22px; }
 .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; white-space: nowrap; }
 .sub { display: block; color: var(--muted); font-weight: 400; font-size: 12.5px; }
+.pj { display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; font-size: 12.5px; font-weight: 700; color: var(--primary); text-decoration: none; } .pj:hover { text-decoration: underline; }
 tfoot td { font-weight: 800; padding: 12px; border-top: 2px solid var(--border); }
 .etat { display: none; font-size: 12px; color: #000; }
 @media (max-width: 860px) { .kpis { grid-template-columns: 1fr 1fr; } .grid2 { grid-template-columns: 1fr; } }

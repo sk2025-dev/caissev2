@@ -13,7 +13,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', outside))
 
 const size = (b) => (b < 1024 * 1024 ? `${Math.max(1, Math.round(b / 1024))} Ko` : `${(b / 1024 / 1024).toFixed(1)} Mo`)
 const heure = (d) => new Date(d.replace(' ', 'T') + 'Z').toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-const titre = (j) => (j.kind === 'database' ? 'Sauvegarde de la base de données' : `${j.kind === 'stock' ? 'État du stock' : j.kind === 'mouvements' ? 'Mouvements de caisse' : 'Ventes'} · ${formatLabel[j.format]}${j.from ? ` · ${j.from.slice(5)} → ${j.to.slice(5)}` : ''}`)
+const titre = (j) => (j.kind === 'database' ? 'Sauvegarde de la base de données' : `${j.kind === 'stock' ? 'État du stock' : j.kind === 'mouvements' ? 'Mouvements de caisse' : j.kind === 'journal' ? 'Journal du mois' : j.kind === 'balance' ? 'Balance des stocks' : 'Ventes'} · ${formatLabel[j.format]}${j.from ? ` · ${j.from.slice(5)} → ${j.to.slice(5)}` : ''}`)
 const label = computed(() => (enCours.value.length ? `Exports : ${enCours.value.length} en cours` : 'Mes exports'))
 </script>
 

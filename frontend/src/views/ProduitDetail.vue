@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { api, fileUrl } from '../api'
-import { money, qty, dateHeure } from '../format'
+import { money, qty, dateHeure, uniteAccord } from '../format'
 import Icon from '../components/Icon.vue'
 
 const props = defineProps({ id: { type: String, required: true } })
@@ -42,7 +42,7 @@ const marge = computed(() => (p.value && Number(p.value.prix_vente) > 0 ? Math.r
 
       <section class="stats">
         <article class="card stat reveal" style="--i:1"><div class="label">Prix de vente</div><div class="spacer" /><div class="value">{{ money(p.prix_vente) }}</div><div class="sub"><span v-if="Number(p.tva_taux) > 0">TVA {{ Number(p.tva_taux) }} % incluse</span><span v-else>Sans TVA</span></div></article>
-        <article v-if="!service" class="card stat reveal" style="--i:2"><div class="label">En stock</div><div class="spacer" /><div class="value">{{ qty(p.stock_qty) }}<span class="unit">{{ p.unite }}</span></div><div class="sub"><span v-if="d.jours_restants !== null">≈ {{ d.jours_restants }} jour{{ d.jours_restants > 1 ? 's' : '' }} de vente</span><span v-else>Valeur {{ money(p.valeur_stock) }}</span></div></article>
+        <article v-if="!service" class="card stat reveal" style="--i:2"><div class="label">En stock</div><div class="spacer" /><div class="value">{{ qty(p.stock_qty) }}<span class="unit">{{ uniteAccord(p.stock_qty, p.unite) }}</span></div><div class="sub"><span v-if="d.jours_restants !== null">≈ {{ d.jours_restants }} jour{{ d.jours_restants > 1 ? 's' : '' }} de vente</span><span v-else>Valeur {{ money(p.valeur_stock) }}</span></div></article>
         <article v-if="!service" class="card stat reveal" style="--i:3"><div class="label">Coût moyen / marge</div><div class="spacer" /><div class="value">{{ money(p.prix_achat) }}</div><div class="sub"><span class="delta" :class="marge >= 0 ? 'up' : 'down'">{{ marge }} %</span><span>de marge brute</span></div></article>
         <article class="card stat reveal" style="--i:4"><div class="label">Ventes (30 jours)</div><div class="spacer" /><div class="value">{{ money(d.ventes_30j.ca) }}</div><div class="sub"><span>{{ qty(d.ventes_30j.qte) }} vendu{{ d.ventes_30j.qte > 1 ? 's' : '' }} · {{ d.ventes_30j.nb_ventes }} ticket{{ d.ventes_30j.nb_ventes > 1 ? 's' : '' }}</span></div></article>
       </section>

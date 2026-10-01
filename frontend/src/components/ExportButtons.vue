@@ -5,7 +5,7 @@ import { startExport } from '../exports'
 import { toast } from '../toast'
 import Icon from './Icon.vue'
 
-const props = defineProps({ kind: { type: String, required: true }, from: { type: String, default: '' }, to: { type: String, default: '' } })
+const props = defineProps({ kind: { type: String, required: true }, from: { type: String, default: '' }, to: { type: String, default: '' }, mois: { type: String, default: '' } })
 const open = ref(false)
 const root = ref(null)
 const busy = ref(false)
@@ -15,7 +15,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', outside))
 
 async function lancer(format) {
   open.value = false; busy.value = true
-  try { await startExport({ kind: props.kind, format, from: props.from, to: props.to }) } catch (e) { toast(e.message, 'error') } finally { busy.value = false }
+  try { await startExport({ kind: props.kind, format, from: props.from, to: props.to, mois: props.mois }) } catch (e) { toast(e.message, 'error') } finally { busy.value = false }
 }
 </script>
 

@@ -6,6 +6,7 @@ import { resources } from '../resources'
 import { loadLookups } from '../lookups'
 import { toast } from '../toast'
 import Icon from '../components/Icon.vue'
+import SearchSelect from '../components/SearchSelect.vue'
 import FormDrawer from '../components/FormDrawer.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
 
@@ -112,9 +113,7 @@ const to = computed(() => Math.min(meta.total, meta.page * meta.per_page))
           <input v-model="query.q" class="input" type="search" :placeholder="config.searchPlaceholder" :aria-label="config.searchPlaceholder" />
         </div>
         <label v-if="config.softStatus" class="check"><input v-model="anciens" type="checkbox" /><span>Afficher les anciens</span></label>
-        <select v-for="f in config.filters || []" :key="f.key" v-model="filtres[f.key]" class="input filter" :aria-label="f.label">
-          <option v-for="o in f.options" :key="o.value" :value="o.value">{{ o.label }}</option>
-        </select>
+        <SearchSelect v-for="f in config.filters || []" :key="f.key" v-model="filtres[f.key]" class="filter" :label="f.label" :options="f.options" />
         <template v-if="config.dateFilter">
           <input v-model="query.from" class="input date" type="date" aria-label="Du" />
           <input v-model="query.to" class="input date" type="date" aria-label="Au" />
@@ -143,10 +142,11 @@ const to = computed(() => Math.min(meta.total, meta.page * meta.per_page))
               <td v-for="(c, ci) in config.columns" :key="c.key" :data-label="c.label" :class="[c.cls, { num: c.align === 'num' }]">
                 <RouterLink v-if="ci === 0 && config.detail" class="rowlink" :to="config.detail(r)">{{ cell(c, r) }}</RouterLink>
                 <template v-else-if="c.badge && c.badge(r)"><span class="badge" :class="c.badge(r).cls">{{ c.badge(r).text }}</span></template>
-                <template v-else>{{ cell(c, r) }}</template>
+                <template v-else><img v-if="c.thumb && c.thumb(r)" :src="c.thumb(r)" alt="" class="thumb" loading="lazy" />{{ cell(c, r) }}</template>
               </td>
               <td class="actions">
                 <RouterLink v-if="config.detail" class="btn ghost icon sm" :to="config.detail(r)" aria-label="Détails" title="Voir la fiche détaillée"><Icon name="eye" :size="16" /></RouterLink>
+                <RouterLink v-for="a in config.rowActions || []" :key="a.label" class="btn ghost icon sm" :to="a.to(r)" :aria-label="a.label" :title="a.label"><Icon :name="a.icon" :size="16" /></RouterLink>
                  <button v-if="peutEcrire" class="btn ghost icon sm" :aria-label="`Modifier`" title="Modifier" @click="editing = r"><Icon name="edit" :size="16" /></button>
                 <button v-if="isAdmin" class="btn ghost icon sm" :aria-label="config.deleteLabel || 'Supprimer'" :title="config.deleteLabel || 'Supprimer'" @click="toDelete = r"><Icon name="trash" :size="16" /></button>
               </td>

@@ -2,7 +2,7 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { api, auth, ApiError } from '../api'
 import { lookups, loadLookups } from '../lookups'
-import { money, qty, dateHeure, today } from '../format'
+import { money, qty, dateHeure, today, uniteAccord } from '../format'
 import { toast } from '../toast'
 import Icon from '../components/Icon.vue'
 import Pager from '../components/Pager.vue'
@@ -52,7 +52,7 @@ async function ajuster() {
 const mvts = ref([])
 const mMeta = reactive({ total: 0, page: 1, pages: 1, per_page: 25 })
 const mf = reactive({ type: '', from: '', to: '', page: 1 })
-const typesMvt = [['initial', 'Stock initial'], ['entree_achat', "Entrée d'achat"], ['sortie_vente', 'Vente'], ['annulation_vente', 'Annulation de vente'], ['ajustement', 'Ajustement'], ['perte', 'Perte / casse'], ['inventaire', 'Inventaire']]
+const typesMvt = [['initial', 'Stock initial'], ['entree_achat', "Entrée d'achat"], ['sortie_vente', 'Vente'], ['annulation_vente', 'Annulation de vente'], ['sortie_commande', 'Commande'], ['annulation_commande', 'Annulation de commande'], ['ajustement', 'Ajustement'], ['perte', 'Perte / casse'], ['inventaire', 'Inventaire']]
 const mLoading = ref(false)
 async function chargerMvts() {
   mLoading.value = true
@@ -100,8 +100,8 @@ onMounted(async () => { await loadLookups().catch(() => {}); chargerNiveaux() })
     <div v-if="onglet === 'niveaux'" class="card">
       <div class="toolbar">
         <div class="search"><Icon name="search" :size="16" /><input v-model="nf.q" class="input" type="search" placeholder="Produit, référence, code-barres…" aria-label="Rechercher" /></div>
-        <select v-model="nf.etat" class="input filter" aria-label="Niveau"><option value="">Tous les niveaux</option><option value="rupture">En rupture</option><option value="bas">Stock bas</option><option value="ok">Stock correct</option></select>
-        <select v-model="nf.idcat" class="input filter" aria-label="Catégorie"><option value="">Toutes catégories</option><option v-for="c in lookups.categories" :key="c.id" :value="c.id">{{ c.nom }}</option></select>
+        <SearchSelect v-model="nf.etat" class="filter" label="Niveau" :options="[{ value: '', label: 'Tous les niveaux' }, { value: 'rupture', label: 'En rupture' }, { value: 'bas', label: 'Stock bas' }, { value: 'ok', label: 'Stock correct' }]" />
+        <SearchSelect v-model="nf.idcat" class="filter" label="Catégorie" :options="[{ value: '', label: 'Toutes catégories' }, ...lookups.categories.map((c) => ({ value: c.id, label: c.nom }))]" />
       </div>
       <div class="table-wrap" :aria-busy="nLoading">
         <table v-if="niveaux.length || nLoading" class="table stack">
@@ -114,7 +114,7 @@ onMounted(async () => { await loadLookups().catch(() => {}); chargerNiveaux() })
             <tr v-for="p in niveaux" :key="p.idprod">
               <td data-label="Produit" class="strong"><RouterLink class="rowlink" :to="`/produits/${p.idprod}`">{{ p.nom }}</RouterLink></td>
               <td data-label="Catégorie">{{ p.categorie || '—' }}</td>
-              <td data-label="En stock" class="num"><b>{{ qty(p.stock_qty) }}</b> {{ p.unite }}</td>
+              <td data-label="En stock" class="num"><b>{{ qty(p.stock_qty) }}</b> {{ uniteAccord(p.stock_qty, p.unite) }}</td>
               <td data-label="Seuil" class="num">{{ Number(p.seuil_alerte) > 0 ? qty(p.seuil_alerte) : '—' }}</td>
               <td data-label="Coût moyen" class="num">{{ money(p.prix_achat) }}</td>
               <td data-label="Valeur" class="num">{{ money(p.valeur_stock) }}</td>
@@ -131,7 +131,7 @@ onMounted(async () => { await loadLookups().catch(() => {}); chargerNiveaux() })
     <!-- Mouvements -->
     <div v-else-if="onglet === 'mouvements'" class="card">
       <div class="toolbar">
-        <select v-model="mf.type" class="input filter" aria-label="Type de mouvement"><option value="">Tous les mouvements</option><option v-for="[k, l] in typesMvt" :key="k" :value="k">{{ l }}</option></select>
+        <SearchSelect v-model="mf.type" class="filter" label="Type de mouvement" :options="[{ value: '', label: 'Tous les mouvements' }, ...typesMvt.map(([k, l]) => ({ value: k, label: l }))]" />
         <input v-model="mf.from" class="input date" type="date" aria-label="Du" /><input v-model="mf.to" class="input date" type="date" aria-label="Au" />
       </div>
       <div class="table-wrap" :aria-busy="mLoading">
@@ -142,7 +142,7 @@ onMounted(async () => { await loadLookups().catch(() => {}); chargerNiveaux() })
               <td data-label="Date">{{ dateHeure(m.created_at) }}</td>
               <td data-label="Produit" class="strong"><RouterLink class="rowlink" :to="`/produits/${m.idprod}`">{{ m.produit }}</RouterLink></td>
               <td data-label="Type">{{ m.libelle_type }}</td>
-              <td data-label="Quantité" class="num"><b :class="Number(m.quantite) >= 0 ? 'pos' : 'neg'">{{ Number(m.quantite) > 0 ? '+' : '' }}{{ qty(m.quantite) }}</b> {{ m.unite }}</td>
+              <td data-label="Quantité" class="num"><b :class="Number(m.quantite) >= 0 ? 'pos' : 'neg'">{{ Number(m.quantite) > 0 ? '+' : '' }}{{ qty(m.quantite) }}</b> {{ uniteAccord(m.quantite, m.unite) }}</td>
               <td data-label="Stock après" class="num">{{ qty(m.stock_apres) }}</td>
               <td data-label="Motif">{{ m.motif || '—' }}</td><td data-label="Par">{{ m.utilisateur || '—' }}</td>
             </tr>
@@ -166,7 +166,7 @@ onMounted(async () => { await loadLookups().catch(() => {}); chargerNiveaux() })
           <tbody>
             <tr v-for="p in invFiltre" :key="p.idprod">
               <td data-label="Produit" class="strong">{{ p.nom }} <small class="muted">{{ p.sku }}</small></td>
-              <td data-label="Théorique" class="num">{{ qty(p.stock_qty) }} {{ p.unite }}</td>
+              <td data-label="Théorique" class="num">{{ qty(p.stock_qty) }} {{ uniteAccord(p.stock_qty, p.unite) }}</td>
               <td data-label="Compté" class="num"><input v-model="inv.compte[p.idprod]" class="input" type="number" min="0" step="any" style="text-align:right" :aria-label="`Quantité comptée de ${p.nom}`" /></td>
               <td data-label="Écart" class="num"><b v-if="ecartDe(p) !== null" :class="ecartDe(p) === 0 ? 'pos' : 'neg'">{{ ecartDe(p) > 0 ? '+' : '' }}{{ qty(ecartDe(p)) }}</b><span v-else class="muted">—</span></td>
             </tr>
@@ -188,7 +188,7 @@ onMounted(async () => { await loadLookups().catch(() => {}); chargerNiveaux() })
     <div v-if="aj.produit" class="overlay center" @click.self="aj.produit = null" @keydown.esc="aj.produit = null">
       <form class="modal" novalidate role="dialog" aria-modal="true" aria-label="Ajuster le stock" @submit.prevent="ajuster">
         <h3>Ajuster le stock</h3>
-        <p class="muted" style="margin:0">{{ aj.produit.nom }} — actuellement <b>{{ qty(aj.produit.stock_qty) }} {{ aj.produit.unite }}</b></p>
+        <p class="muted" style="margin:0">{{ aj.produit.nom }} — actuellement <b>{{ qty(aj.produit.stock_qty) }} {{ uniteAccord(aj.produit.stock_qty, aj.produit.unite) }}</b></p>
         <div style="display:flex;flex-direction:column;gap:14px;margin-top:14px">
           <div class="field"><label>Nature</label><div class="seg"><button type="button" :class="{ on: aj.type === 'ajustement' }" @click="aj.type = 'ajustement'">Correction</button><button type="button" :class="{ on: aj.type === 'perte' }" @click="aj.type = 'perte'">Perte / casse</button></div></div>
           <div class="field"><label>Saisie</label><div class="seg"><button type="button" :class="{ on: aj.mode === 'delta' }" @click="aj.mode = 'delta'">{{ aj.type === 'perte' ? 'Quantité perdue' : 'Ajouter / retirer' }}</button><button type="button" :class="{ on: aj.mode === 'set' }" @click="aj.mode = 'set'">Nouveau stock</button></div></div>

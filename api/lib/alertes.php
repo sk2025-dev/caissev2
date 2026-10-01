@@ -4,6 +4,16 @@
  * Alimentent la cloche de l'application et le résumé envoyé par e-mail.
  */
 
+/** Unité accordée en nombre : « 2 pièces », « 1,5 pièce » ; abréviations (kg, L, ml…) et expressions laissées telles quelles. */
+function unite_accord($q, $unite)
+{
+    $u = trim((string)$unite);
+    if (abs((float)$q) < 2 || !preg_match('/^\p{Ll}{3,}$/u', $u) || preg_match('/[sxz]$/u', $u)) return $u;
+    return preg_match('/(au|eu)$/u', $u) ? $u . 'x' : $u . 's';
+}
+
+function qte_texte($q) { return rtrim(rtrim(number_format((float)$q, 3, ',', ' '), '0'), ','); }
+
 function alertes_liste(PDO $db, array $reg)
 {
     $types = array_filter(explode(',', $reg['alertes.types']));
@@ -13,12 +23,12 @@ function alertes_liste(PDO $db, array $reg)
     $suivi = "p.supp = 0 AND p.actif = 1 AND p.stockable = 1 AND (p.seuil_alerte > 0 OR EXISTS (SELECT 1 FROM mouvements_stock m WHERE m.idprod = p.idprod))";
     if (in_array('rupture', $types, true)) {
         foreach ($db->query("SELECT p.idprod, p.nom, p.unite FROM produits p WHERE $suivi AND p.stock_qty <= 0 ORDER BY p.nom LIMIT 100")->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $a[] = ['type' => 'rupture', 'id' => (int)$r['idprod'], 'label' => $r['nom'], 'detail' => 'en rupture de stock', 'niveau' => 'danger', 'jours' => -1];
+            $a[] = ['type' => 'rupture', 'id' => (int)$r['idprod'], 'label' => $r['nom'], 'detail' => '', 'niveau' => 'danger', 'jours' => -1];
         }
     }
     if (in_array('stock_bas', $types, true)) {
         foreach ($db->query("SELECT p.idprod, p.nom, p.stock_qty, p.seuil_alerte, p.unite FROM produits p WHERE $suivi AND p.stock_qty > 0 AND p.seuil_alerte > 0 AND p.stock_qty <= p.seuil_alerte ORDER BY p.stock_qty / p.seuil_alerte LIMIT 100")->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $a[] = ['type' => 'stock_bas', 'id' => (int)$r['idprod'], 'label' => $r['nom'], 'detail' => 'reste ' . rtrim(rtrim(number_format($r['stock_qty'], 3, '.', ''), '0'), '.') . ' ' . $r['unite'] . ' (seuil ' . rtrim(rtrim(number_format($r['seuil_alerte'], 3, '.', ''), '0'), '.') . ')', 'niveau' => 'warning', 'jours' => 0];
+            $a[] = ['type' => 'stock_bas', 'id' => (int)$r['idprod'], 'label' => $r['nom'], 'detail' => 'reste ' . qte_texte($r['stock_qty']) . ' ' . unite_accord($r['stock_qty'], $r['unite']) . ' (seuil ' . qte_texte($r['seuil_alerte']) . ')', 'niveau' => 'warning', 'jours' => 0];
         }
     }
     if (in_array('creances', $types, true)) {

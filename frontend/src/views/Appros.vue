@@ -64,7 +64,7 @@ onMounted(async () => { await loadLookups().catch(() => {}); load() })
     <div class="card">
       <div class="toolbar">
         <div class="search"><Icon name="search" :size="16" /><input v-model="f.q" class="input" type="search" placeholder="N° de réception, bon ou fournisseur…" aria-label="Rechercher" /></div>
-        <select v-model="f.idfour" class="input filter" aria-label="Fournisseur"><option value="">Tous les fournisseurs</option><option v-for="x in lookups.fournisseurs" :key="x.id" :value="x.id">{{ x.nom }}</option></select>
+        <SearchSelect v-model="f.idfour" class="filter" label="Fournisseur" :options="[{ value: '', label: 'Tous les fournisseurs' }, ...lookups.fournisseurs.map((x) => ({ value: x.id, label: x.nom }))]" />
         <input v-model="f.from" class="input date" type="date" aria-label="Du" /><input v-model="f.to" class="input date" type="date" aria-label="Au" />
       </div>
       <div class="table-wrap" :aria-busy="loading">

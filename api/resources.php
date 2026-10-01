@@ -28,6 +28,7 @@ return [
             'nom' => ['type' => 'string', 'required' => true, 'max' => 100],
             'couleur' => ['type' => 'string', 'max' => 9],
             'ordre' => ['type' => 'int', 'min' => 0, 'max' => 9999],
+            'image' => ['type' => 'file', 'dir' => 'categories', 'allow' => ['jpg', 'jpeg', 'png', 'webp']],
         ],
         'before_save' => function (PDO $db, array $d, $existing, $user) {
             if (isset($d['nom'])) unique_ou_erreur($db, 'categories', 'nom', $d['nom'], 'idcat', $existing ? $existing['idcat'] : 0, 'nom', 'Cette catégorie existe déjà');
@@ -36,6 +37,29 @@ return [
         'before_delete' => function (PDO $db, $id, $user) {
             $st = $db->prepare('SELECT COUNT(*) FROM produits WHERE idcat = :i AND supp = 0'); $st->execute(['i' => $id]);
             if ((int)$st->fetchColumn() > 0) throw new ApiError(409, 'Cette catégorie contient des produits : déplacez-les d\'abord.');
+        },
+    ],
+
+    'zones-livraison' => [
+        'table' => 'zones_livraison', 'pk' => 'idzone', 'pk_col' => 'z.idzone',
+        'select' => 'z.*', 'from' => 'zones_livraison z', 'where' => 'z.supp = 0',
+        'search' => ['z.nom', 'z.commune'], 'filters' => ['zone' => 'z.zone'],
+        'sort' => ['nom' => 'z.nom', 'commune' => 'z.commune', 'prix' => 'z.prix', 'zone' => 'z.zone'], 'default_sort' => "FIELD(z.zone, 'abidjan', 'interieur', 'exterieur'), z.commune ASC, z.nom ASC",
+        'audit' => $audit, 'on_create' => ['supp' => 0], 'soft_delete' => ['supp' => 1], 'roles_ecriture' => ['admin', 'superadmin'],
+        'fields' => [
+            'zone' => ['type' => 'enum', 'values' => ['abidjan', 'interieur', 'exterieur'], 'required' => true],
+            'commune' => ['type' => 'string', 'max' => 80],
+            'nom' => ['type' => 'string', 'required' => true, 'max' => 100],
+            'prix' => ['type' => 'number', 'required' => true],
+            'delai' => ['type' => 'string', 'max' => 40],
+            'actif' => ['type' => 'enum', 'values' => [0, 1]],
+        ],
+        'before_save' => function (PDO $db, array $d, $existing, $user) {
+            $zone = $d['zone'] ?? ($existing['zone'] ?? ''); $nom = $d['nom'] ?? ($existing['nom'] ?? ''); $commune = $d['commune'] ?? ($existing['commune'] ?? '');
+            $st = $db->prepare('SELECT COUNT(*) FROM zones_livraison WHERE supp = 0 AND zone = :z AND commune = :c AND nom = :n AND idzone <> :i');
+            $st->execute(['z' => $zone, 'c' => $commune, 'n' => $nom, 'i' => $existing ? $existing['idzone'] : 0]);
+            if ((int)$st->fetchColumn() > 0) throw new ApiError(422, 'Données invalides', ['nom' => 'Ce lieu a déjà un tarif']);
+            return $d;
         },
     ],
 
@@ -153,7 +177,7 @@ return [
         'roles' => ['admin', 'superadmin'], 'roles_ecriture' => ['admin', 'superadmin'],
         'scope' => function ($user) { return is_super_role($user['role']) ? '1=1' : "(g.coden IS NULL OR g.coden <> 'superadmin')"; },
         'table' => 'users', 'pk' => 'id_user', 'pk_col' => 'u.id_user',
-        'select' => 'u.id_user, u.nomag, u.prenom, u.emailag, u.telag, u.gpe, u.user_status, u.dateenr, g.coden AS groupe',
+        'select' => 'u.id_user, u.nomag, u.prenom, u.emailag, u.telag, u.gpe, u.user_status, u.photo_user, u.dateenr, g.coden AS groupe',
         'from' => 'users u LEFT JOIN table_gpe_users g ON g.idgpe = u.gpe',
         'where' => '1=1',
         'search' => ['u.nomag', 'u.prenom', 'u.emailag'],
@@ -168,6 +192,7 @@ return [
             'pass' => ['type' => 'password', 'required' => true],
             'gpe' => ['type' => 'ref', 'required' => true, 'table' => 'table_gpe_users', 'pk' => 'idgpe'],
             'user_status' => ['type' => 'enum', 'values' => [0, 1]],
+            'photo_user' => ['type' => 'file', 'dir' => 'utilisateurs', 'allow' => ['jpg', 'jpeg', 'png', 'webp']],
         ],
         'before_save' => function (PDO $db, array $d, $existing, $user) {
             // Seul un super administrateur peut attribuer ce rôle

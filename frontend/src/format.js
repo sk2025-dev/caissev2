@@ -17,6 +17,12 @@ export function monthLabel(ym) {
   return d.toLocaleDateString('fr-FR', { month: 'short' }).replace('.', '')
 }
 
+/** Unité accordée en nombre : « 2 pièces », « 1,5 pièce » ; abréviations (kg, L, ml…) et expressions laissées telles quelles. */
+export function uniteAccord(q, unite) {
+  const u = String(unite || '').trim()
+  if (Math.abs(Number(q)) < 2 || !/^\p{Ll}{3,}$/u.test(u) || /[sxz]$/.test(u)) return u
+  return /(au|eu)$/.test(u) ? `${u}x` : `${u}s`
+}
 export const compact = (v) => new Intl.NumberFormat('fr-FR', { notation: 'compact', maximumFractionDigits: 1 }).format(Number(v || 0))
 
 export const alerteLibelle = (type) => ({ rupture: 'Rupture de stock', stock_bas: 'Stock bas', creances: 'Créance ancienne', ecart_caisse: 'Écart de caisse', licence: "Licence d'utilisation" }[type] || type)

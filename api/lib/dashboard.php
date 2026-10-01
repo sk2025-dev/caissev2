@@ -66,9 +66,14 @@ function dashboard_data(PDO $db, array $user)
     $out['serie'] = array_values($serie);
 
     $p = ['a' => $debutMois . ' 00:00:00'];
-    $st = $db->prepare("SELECT l.idprod, MIN(l.designation) AS nom, SUM(l.quantite) AS quantite, SUM(l.total) AS ca FROM vente_lignes l JOIN ventes v ON v.idvente = l.idvente WHERE v.statut = 'validee' AND v.date_vente >= :a GROUP BY l.idprod ORDER BY ca DESC LIMIT 6");
-    $st->execute($p);
-    $out['top_produits'] = array_map(function ($r) { return ['id' => (int)$r['idprod'], 'nom' => $r['nom'], 'quantite' => $r['quantite'] + 0, 'ca' => $r['ca'] + 0]; }, $st->fetchAll(PDO::FETCH_ASSOC));
+    // Performance des produits du mois : classée par montant vendu (top_produits) et par nombre d'unités vendues (top_quantite)
+    $top = function ($ordre) use ($db, $p) {
+        $st = $db->prepare("SELECT l.idprod, MIN(l.designation) AS nom, MIN(pr.unite) AS unite, SUM(l.quantite) AS quantite, SUM(l.total) AS ca, COUNT(DISTINCT l.idvente) AS nb_ventes FROM vente_lignes l JOIN ventes v ON v.idvente = l.idvente LEFT JOIN produits pr ON pr.idprod = l.idprod WHERE v.statut = 'validee' AND v.date_vente >= :a GROUP BY l.idprod ORDER BY $ordre LIMIT 6");
+        $st->execute($p);
+        return array_map(function ($r) { return ['id' => (int)$r['idprod'], 'nom' => $r['nom'], 'unite' => (string)$r['unite'], 'quantite' => $r['quantite'] + 0, 'ca' => $r['ca'] + 0, 'nb_ventes' => (int)$r['nb_ventes']]; }, $st->fetchAll(PDO::FETCH_ASSOC));
+    };
+    $out['top_produits'] = $top('ca DESC, quantite DESC');
+    $out['top_quantite'] = $top('quantite DESC, ca DESC');
 
     $st = $db->prepare("SELECT COALESCE(c.nom, 'Sans catégorie') AS label, SUM(l.total) AS montant FROM vente_lignes l JOIN ventes v ON v.idvente = l.idvente LEFT JOIN produits pr ON pr.idprod = l.idprod LEFT JOIN categories c ON c.idcat = pr.idcat WHERE v.statut = 'validee' AND v.date_vente >= :a GROUP BY COALESCE(c.nom, 'Sans catégorie') ORDER BY montant DESC");
     $st->execute($p);
@@ -104,4 +109,40 @@ function dashboard_data(PDO $db, array $user)
     $st->execute($p);
     $out['caissiers'] = array_map(function ($r) { return ['caissier' => trim($r['caissier']), 'nb' => (int)$r['nb'], 'ca' => $r['ca'] + 0]; }, $st->fetchAll(PDO::FETCH_ASSOC));
     return $out;
+}
+
+/** Journal du mois : ventes validées et sorties d'espèces par jour et par caisse, plus les dépenses hors caisse (gérant). */
+function dashboard_mensuel(PDO $db, array $user, $mois)
+{
+    exiger($user, 'ventes.lire_toutes');
+    if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', (string)$mois)) $mois = gmdate('Y-m');
+    $debut = $mois . '-01'; $fin = gmdate('Y-m-t', strtotime($debut));
+    $p = ['a' => $debut . ' 00:00:00', 'b' => $fin . ' 23:59:59'];
+
+    $jours = [];
+    for ($t = strtotime($debut); $t <= strtotime($fin); $t += 86400) $jours[] = gmdate('Y-m-d', $t);
+
+    $st = $db->prepare("SELECT SUBSTR(date_vente, 1, 10) AS jour, idcaisse, COUNT(*) AS nb, SUM(total) AS ca FROM ventes WHERE statut = 'validee' AND date_vente >= :a AND date_vente <= :b GROUP BY SUBSTR(date_vente, 1, 10), idcaisse");
+    $st->execute($p);
+    $ventes = []; $actives = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) { $ventes[$r['jour']][$r['idcaisse']] = ['ca' => $r['ca'] + 0, 'nb' => (int)$r['nb']]; $actives[$r['idcaisse']] = true; }
+
+    $st = $db->prepare("SELECT SUBSTR(o.created_at, 1, 10) AS jour, s.idcaisse, SUM(o.montant) AS montant FROM caisse_operations o JOIN sessions_caisse s ON s.idsession = o.idsession WHERE o.type = 'sortie' AND o.created_at >= :a AND o.created_at <= :b GROUP BY SUBSTR(o.created_at, 1, 10), s.idcaisse");
+    $st->execute($p);
+    $sorties = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) { $sorties[$r['jour']][$r['idcaisse']] = $r['montant'] + 0; $actives[$r['idcaisse']] = true; }
+
+    // Dépenses réglées hors caisse par le gérant (coffre, banque, mobile money)
+    $st = $db->prepare("SELECT SUBSTR(created_at, 1, 10) AS jour, SUM(montant) AS montant FROM caisse_operations WHERE idsession IS NULL AND type = 'sortie' AND created_at >= :a AND created_at <= :b GROUP BY SUBSTR(created_at, 1, 10)");
+    $st->execute($p);
+    $hors = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) $hors[$r['jour']] = $r['montant'] + 0;
+
+    // Caisses actives, plus celles (même désactivées depuis) qui ont eu un mouvement dans le mois
+    $caisses = array_values(array_filter($db->query('SELECT idcaisse, nom, actif, supp FROM caisses ORDER BY idcaisse')->fetchAll(PDO::FETCH_ASSOC), function ($c) use ($actives) {
+        return isset($actives[$c['idcaisse']]) || ((int)$c['actif'] === 1 && (int)$c['supp'] === 0);
+    }));
+    $caisses = array_map(function ($c) { return ['idcaisse' => (int)$c['idcaisse'], 'nom' => $c['nom']]; }, $caisses);
+
+    return ['mois' => $mois, 'jours' => $jours, 'caisses' => $caisses, 'ventes' => (object)$ventes, 'sorties' => (object)$sorties, 'hors_caisse' => (object)$hors];
 }

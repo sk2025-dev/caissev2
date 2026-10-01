@@ -36,6 +36,8 @@ class XlSheet
     public $freeze = null;  // [ligne, colonne] : première cellule non figée (1-based)
     public $filter = null;  // "A5:G99"
     public $heights = [];
+    public $entete = '';     // en-tête et pied de page d'impression (codes Excel &L &C &R &P &N)
+    public $pied = '';
     private $cur = 0;
 
     public function __construct($name) { $this->name = preg_replace('/[\\\\\/\?\*\[\]:]/', ' ', mb_substr($name, 0, 31)); }
@@ -99,7 +101,12 @@ class XlSheet
             foreach ($this->merges as $m) $x .= '<mergeCell ref="' . $m . '"/>';
             $x .= '</mergeCells>';
         }
-        $x .= '<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="landscape" fitToHeight="0"/></worksheet>';
+        $x .= '<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="landscape" fitToHeight="0"/>';
+        if ($this->entete !== '' || $this->pied !== '') {
+            $e = function ($t) { return htmlspecialchars($t, ENT_XML1 | ENT_QUOTES, 'UTF-8'); };
+            $x .= '<headerFooter>' . ($this->entete !== '' ? '<oddHeader>' . $e($this->entete) . '</oddHeader>' : '') . ($this->pied !== '' ? '<oddFooter>' . $e($this->pied) . '</oddFooter>' : '') . '</headerFooter>';
+        }
+        $x .= '</worksheet>';
         return $x;
     }
 }
@@ -107,12 +114,24 @@ class XlSheet
 class XlBook
 {
     private $sheets = [];
+    private $c;              // couleurs (hexadécimal sans #) : principale, douce, pale, bordure
+    private $entete = ''; private $pied = '';
 
-    public function sheet($name) { return $this->sheets[] = new XlSheet($name); }
+    public function __construct(array $couleurs = [], $entete = '', $pied = '')
+    {
+        $this->c = $couleurs + ['principale' => '7048E8', 'douce' => 'E7DFFF', 'pale' => 'F3F0FA', 'bordure' => 'D9D4E8'];
+        $this->entete = $entete; $this->pied = $pied;
+    }
+
+    public function sheet($name) { $s = new XlSheet($name); $s->entete = $this->entete; $s->pied = $this->pied; return $this->sheets[] = $s; }
+
+    /** Texte libre utilisable dans un en-tête / pied de page Excel (« & » y est un code de mise en forme). */
+    public static function texteEntete($t) { return str_replace('&', '&&', (string)$t); }
 
     private function stylesXml()
     {
-        $thin = '<left style="thin"><color rgb="FFD9D4E8"/></left><right style="thin"><color rgb="FFD9D4E8"/></right><top style="thin"><color rgb="FFD9D4E8"/></top><bottom style="thin"><color rgb="FFD9D4E8"/></bottom><diagonal/>';
+        $c = $this->c; $bd = 'FF' . $c['bordure'];
+        $thin = '<left style="thin"><color rgb="' . $bd . '"/></left><right style="thin"><color rgb="' . $bd . '"/></right><top style="thin"><color rgb="' . $bd . '"/></top><bottom style="thin"><color rgb="' . $bd . '"/></bottom><diagonal/>';
         $xf = function ($num, $font, $fill, $border, $align = '') {
             return '<xf numFmtId="' . $num . '" fontId="' . $font . '" fillId="' . $fill . '" borderId="' . $border . '" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"' . ($align ? ' applyAlignment="1">' . $align . '</xf>' : '/>');
         };
@@ -122,8 +141,8 @@ class XlBook
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
             . '<numFmts count="5"><numFmt numFmtId="164" formatCode="#,##0;[Red]\-#,##0;&quot;–&quot;"/><numFmt numFmtId="165" formatCode="dd/mm/yyyy"/><numFmt numFmtId="166" formatCode="0.0%"/><numFmt numFmtId="167" formatCode="dd/mm/yyyy hh:mm"/><numFmt numFmtId="168" formatCode="#,##0.###"/></numFmts>'
             . '<fonts count="5"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="15"/><color rgb="FF2A2340"/><name val="Calibri"/></font><font><i/><sz val="10"/><color rgb="FF7B7393"/><name val="Calibri"/></font></fonts>'
-            . '<fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF7048E8"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE7DFFF"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF3F0FA"/></patternFill></fill></fills>'
-            . '<borders count="3"><border><left/><right/><top/><bottom/><diagonal/></border><border>' . $thin . '</border><border><left/><right/><top style="medium"><color rgb="FF7048E8"/></top><bottom/><diagonal/></border></borders>'
+            . '<fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF' . $c['principale'] . '"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF' . $c['douce'] . '"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF' . $c['pale'] . '"/></patternFill></fill></fills>'
+            . '<borders count="3"><border><left/><right/><top/><bottom/><diagonal/></border><border>' . $thin . '</border><border><left/><right/><top style="medium"><color rgb="FF' . $c['principale'] . '"/></top><bottom/><diagonal/></border></borders>'
             . '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
             . '<cellXfs count="16">'
             . $xf(0, 0, 0, 0)                   // 0 normal

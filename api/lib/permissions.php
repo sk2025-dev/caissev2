@@ -6,8 +6,8 @@
 const DROITS = [
     'superadmin' => ['*'],
     'admin' => ['*'],
-    'caissier' => ['catalogue.lire', 'clients.lire', 'clients.ecrire', 'caisse.vendre', 'ventes.lire_siennes', 'stock.lire'],
-    'magasinier' => ['catalogue.lire', 'catalogue.ecrire', 'stock.lire', 'stock.ecrire', 'achats.lire', 'achats.ecrire', 'fournisseurs.lire', 'fournisseurs.ecrire', 'clients.lire'],
+    'caissier' => ['catalogue.lire', 'clients.lire', 'clients.ecrire', 'caisse.vendre', 'ventes.lire_siennes', 'stock.lire', 'commandes.lire', 'commandes.ecrire', 'commandes.statut'],
+    'magasinier' => ['catalogue.lire', 'catalogue.ecrire', 'stock.lire', 'stock.ecrire', 'achats.lire', 'achats.ecrire', 'fournisseurs.lire', 'fournisseurs.ecrire', 'clients.lire', 'commandes.lire', 'commandes.statut'],
 ];
 
 function role_peut($role, $droit)

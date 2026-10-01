@@ -1,9 +1,10 @@
 <?php
 /**
  * API JSON — point d'entrée unique.   GET/POST/DELETE  api/index.php?r=<route>[&id=N]
- *   auth/* · public-config · dashboard · lookups · search · alertes · exports · config*
- *   caisse : pos-catalogue · session-* · operation-caisse · vente-creer · ventes · vente · vente-annuler · paniers
- *   stock : stock-ajuster · inventaire · inventaires · mouvements-stock    achats : appro-creer · appros · appro · reglement-creer · reglements
+ *   auth/* · public-config · dashboard · dashboard-mensuel · lookups · search · alertes · exports · config*
+ *   caisse : pos-catalogue · mouvements-caisse · session-* · operation-caisse · depense-creer · categorie-mouvement-creer · justificatif · vente-creer · ventes · vente · vente-annuler · paniers
+ *   commandes : commandes · commande · commande-creer · commande-statut · commande-livrer · commande-annuler
+ *   stock : stock-ajuster · inventaire · inventaires · mouvements-stock · stock-balance    achats : appro-creer · appros · appro · reglement-creer · reglements
  *   fiches : produit-detail · client-detail · fournisseur-detail
  *   ressources CRUD : produits · categories · clients · fournisseurs · caisses · utilisateurs
  */
@@ -15,14 +16,17 @@ require_once __DIR__ . '/lib/crud.php';
 require_once __DIR__ . '/lib/auth.php';
 require_once __DIR__ . '/lib/stock.php';
 require_once __DIR__ . '/lib/achats.php';
+require_once __DIR__ . '/lib/mouvements.php';
 require_once __DIR__ . '/lib/caisse.php';
 require_once __DIR__ . '/lib/ventes.php';
+require_once __DIR__ . '/lib/commandes.php';
 require_once __DIR__ . '/lib/dashboard.php';
 require_once __DIR__ . '/lib/alertes.php';
 require_once __DIR__ . '/lib/exports.php';
 require_once __DIR__ . '/lib/config.php';
 require_once __DIR__ . '/lib/alertes_mail.php';
 require_once __DIR__ . '/lib/fiches.php';
+require_once __DIR__ . '/lib/utilisateurs.php';
 
 // Le flux d'erreurs PHP ne doit jamais polluer le JSON
 ini_set('display_errors', '0');
@@ -104,33 +108,48 @@ $post = function () use ($method) { if ($method !== 'POST') throw new ApiError(4
 
 switch ($r) {
     case 'dashboard': json_out(dashboard_data($bdd, $user));
+    case 'dashboard-mensuel': json_out(dashboard_mensuel($bdd, $user, isset($q['mois']) ? $q['mois'] : ''));
     case 'alertes': json_out(['alertes' => role_peut($user['role'], 'stock.lire') ? alertes_liste($bdd, $reglages) : []]);
 
     case 'lookups':
         $t = function ($sql) use ($bdd) { return $bdd->query($sql)->fetchAll(PDO::FETCH_ASSOC); };
         json_out([
-            'categories' => $t('SELECT idcat AS id, nom, couleur FROM categories WHERE supp = 0 ORDER BY ordre, nom'),
+            'categories' => $t('SELECT idcat AS id, nom, couleur, image FROM categories WHERE supp = 0 ORDER BY ordre, nom'),
             'fournisseurs' => role_peut($user['role'], 'fournisseurs.lire') ? $t('SELECT idfour AS id, nom FROM fournisseurs WHERE supp = 0 ORDER BY nom') : [],
             'modes' => array_values(modes_actifs($bdd)),
+            'categories_mvt' => mouvements_categories(),
+            'sources_depense' => role_peut($user['role'], 'depenses.gerer') ? mouvements_sources() : [],
+            'zones_livraison' => role_peut($user['role'], 'commandes.lire') ? $t('SELECT idzone AS id, zone, commune, nom, prix, delai FROM zones_livraison WHERE supp = 0 AND actif = 1 ORDER BY zone, commune, nom') : [],
             'caisses' => $t('SELECT idcaisse AS id, nom FROM caisses WHERE supp = 0 AND actif = 1 ORDER BY idcaisse'),
             'caissiers' => role_peut($user['role'], 'ventes.lire_toutes') ? $t("SELECT id_user AS id, CONCAT(nomag, ' ', prenom) AS nom FROM users WHERE user_status = 1 ORDER BY nomag") : [],
             'groupes' => is_admin_role($user['role']) ? $t('SELECT idgpe AS id, coden AS nom FROM table_gpe_users' . (is_super_role($user['role']) ? '' : " WHERE coden <> 'superadmin'") . ' ORDER BY coden') : [],
             'reglages' => ['tva_defaut' => (float)$reglages['caisse.tva_defaut'], 'prix_libre' => $reglages['caisse.prix_libre'] === '1', 'remise_max' => (float)$reglages['caisse.remise_max'], 'stock_negatif' => $reglages['caisse.stock_negatif'] === '1'],
         ]);
 
+    case 'carte': json_out(utilisateur_carte($bdd, $user, $id));
+    case 'carte-photo': $post(); json_out(utilisateur_photo($bdd, $user, $id, $_FILES, $corps));
+
     case 'search': json_out(recherche_globale($bdd, $user, isset($q['q']) ? $q['q'] : ''));
 
     /* ---- Caisse ---- */
     case 'pos-catalogue': exiger($user, 'caisse.vendre'); json_out(pos_catalogue($bdd));
     case 'session-courante': json_out(['session' => session_courante($bdd, $user['id'])]);
+    case 'caisses-occupation': json_out(['occupees' => caisses_occupation($bdd, $user)]);
     case 'session-ouvrir': $post(); json_out(['session' => session_ouvrir($bdd, $user, $corps)], 201);
     case 'session-cloturer': $post(); json_out(['rapport' => session_cloturer($bdd, $user, $corps)]);
+    case 'session-forcer-cloture': $post(); json_out(['rapport' => session_forcer_cloture($bdd, $user, $corps)]);
     case 'operation-caisse': $post(); json_out(['operation' => operation_caisse($bdd, $user, $corps)], 201);
+    case 'depense-creer': $post(); json_out(['operation' => depense_creer($bdd, $user, $corps, $_FILES)], 201);
+    case 'categorie-mouvement-creer': $post(); json_out(['categorie' => categorie_mouvement_creer($bdd, $user, $corps), 'categories_mvt' => mouvements_categories()], 201);
+    case 'justificatif': justificatif_envoyer($bdd, $user, $id);
     case 'session-rapport':
         $rap = session_rapport($bdd, $id);
         if ((int)$rap['session']['iduser'] !== (int)$user['id'] && !role_peut($user['role'], 'ventes.lire_toutes')) throw new ApiError(403, 'Cette caisse appartient à un autre caissier.');
         json_out($rap);
     case 'sessions': json_out(sessions_liste($bdd, $user, $q));
+    case 'mouvements-caisse':
+        if (!role_peut($user['role'], 'ventes.lire_toutes') && !role_peut($user['role'], 'caisse.vendre')) throw new ApiError(403, "Votre rôle ne permet pas cette action.");
+        json_out(mouvements_caisse_liste($bdd, $user, $q));
 
     case 'vente-creer': $post(); json_out(['vente' => vente_creer($bdd, $user, $corps)], 201);
     case 'ventes': json_out(ventes_liste($bdd, $user, $q));
@@ -143,10 +162,19 @@ switch ($r) {
         if ($method === 'DELETE') { panier_supprimer($bdd, $user, $id); json_out(['ok' => true]); }
         throw new ApiError(405, 'Méthode non autorisée');
 
+    /* ---- Commandes et livraisons ---- */
+    case 'commandes': json_out(commandes_liste($bdd, $user, $q));
+    case 'commande': if (!$id) throw new ApiError(400, 'Identifiant requis'); json_out(['commande' => commande_detail($bdd, $user, $id)]);
+    case 'commande-creer': $post(); json_out(['commande' => commande_creer($bdd, $user, $corps)], 201);
+    case 'commande-statut': $post(); json_out(['commande' => commande_statut($bdd, $user, $corps)]);
+    case 'commande-livrer': $post(); json_out(commande_livrer($bdd, $user, $corps));
+    case 'commande-annuler': $post(); json_out(['commande' => commande_annuler($bdd, $user, $corps)]);
+
     /* ---- Stock et achats ---- */
     case 'stock-ajuster': $post(); json_out(['resultat' => stock_ajuster($bdd, $user, $corps)], 201);
     case 'inventaire': $post(); json_out(['resultat' => inventaire_creer($bdd, $user, $corps)], 201);
     case 'mouvements-stock': exiger($user, 'stock.lire'); json_out(mouvements_liste($bdd, $q));
+    case 'stock-balance': exiger($user, 'stock.lire'); json_out(stock_balance($bdd, isset($q['mois']) ? $q['mois'] : ''));
     case 'appro-creer': $post(); json_out(['appro' => appro_creer($bdd, $user, $corps)], 201);
     case 'appros': exiger($user, 'achats.lire'); json_out(appros_liste($bdd, $q));
     case 'appro': exiger($user, 'achats.lire'); json_out(['appro' => appro_detail($bdd, $id)]);
@@ -182,8 +210,8 @@ switch ($r) {
     /* ---- Images des produits (réservées aux utilisateurs connectés) ---- */
     case 'fichier':
         $dir = isset($q['d']) ? $q['d'] : ''; $nom = isset($q['f']) ? basename($q['f']) : '';
-        if ($dir !== 'produits' || $nom === '') throw new ApiError(404, 'Fichier introuvable');
-        $chemin = dirname(__DIR__) . '/doc/produits/' . $nom;
+        if (!in_array($dir, ['produits', 'utilisateurs', 'categories'], true) || $nom === '') throw new ApiError(404, 'Fichier introuvable');
+        $chemin = dirname(__DIR__) . '/doc/' . $dir . '/' . $nom;
         if (!is_file($chemin)) throw new ApiError(404, 'Fichier introuvable');
         $types = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'webp' => 'image/webp'];
         $ext = strtolower(pathinfo($nom, PATHINFO_EXTENSION));

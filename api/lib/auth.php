@@ -13,8 +13,9 @@ function api_user_public()
         'email' => $_SESSION['email'],
         'role' => $_SESSION['gpe'],
         'admin' => is_admin_role($_SESSION['gpe']),
-        'droits' => array_combine($k = ['caisse', 'catalogue_ecriture', 'stock_ecriture', 'achats', 'ventes_toutes', 'clients_ecriture', 'fournisseurs', 'stock'], array_map(function ($d) { return role_peut($_SESSION['gpe'], $d); }, ['caisse.vendre', 'catalogue.ecrire', 'stock.ecrire', 'achats.lire', 'ventes.lire_toutes', 'clients.ecrire', 'fournisseurs.lire', 'stock.lire'])),
+        'droits' => array_combine($k = ['caisse', 'catalogue_ecriture', 'stock_ecriture', 'achats', 'ventes_toutes', 'clients_ecriture', 'fournisseurs', 'stock', 'commandes', 'commandes_ecriture', 'commandes_statut', 'depenses'], array_map(function ($d) { return role_peut($_SESSION['gpe'], $d); }, ['caisse.vendre', 'catalogue.ecrire', 'stock.ecrire', 'achats.lire', 'ventes.lire_toutes', 'clients.ecrire', 'fournisseurs.lire', 'stock.lire', 'commandes.lire', 'commandes.ecrire', 'commandes.statut', 'depenses.gerer'])),
         'super' => is_super_role($_SESSION['gpe']),
+        'photo' => isset($_SESSION['photo']) ? $_SESSION['photo'] : '',
         'csrf' => csrf_token(),
     ];
 }

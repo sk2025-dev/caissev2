@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch, computed, provide, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { auth, api, logout, prenomDe, estCaissier } from './api'
+import { auth, api, logout, prenomDe, estCaissier, fileUrl } from './api'
 import { showSplash, hideSplash, pause } from './splash'
 import SplashScreen from './components/SplashScreen.vue'
 import { toasts } from './toast'
@@ -49,7 +49,7 @@ const nav = computed(() => [
   { to: '/caisse', label: 'Caisse', icon: 'cart', droit: 'caisse' },
   { to: '/ventes', label: 'Ventes', icon: 'receipt', droit: ['caisse', 'ventes_toutes'] },
   { to: '/commandes', label: 'Commandes et livraisons', icon: 'truck', droit: 'commandes' },
-  { to: '/mouvements', label: 'Mouvements de caisse', icon: 'swap', droit: ['caisse', 'ventes_toutes'] },
+  { to: '/mouvements', label: 'Dépenses et mouvements', icon: 'swap', droit: ['caisse', 'ventes_toutes'] },
   { to: '/sessions', label: 'Sessions de caisse', icon: 'cash', droit: ['caisse', 'ventes_toutes'] },
   { sep: 'Catalogue' },
   { to: '/produits', label: 'Produits et services', icon: 'tag' },
@@ -131,17 +131,20 @@ provide('deconnecter', doLogout)
           </button>
           <div v-if="popup === 'bell'" class="menu wide" role="dialog" aria-label="Alertes">
             <div class="who"><b>À surveiller</b><span>{{ alertes.length ? `${alertes.length} point${alertes.length > 1 ? 's' : ''} demandent votre attention` : 'Tout est en ordre 🎉' }}</span></div>
-            <RouterLink v-for="a in alertes.slice(0, 7)" :key="a.type + a.id" :to="alerteLien(a.type, a.id)" class="row alert-item">
-              <span class="tile" :class="a.niveau"><Icon name="alert" :size="18" /></span>
-              <div><b>{{ a.label }}</b><span>{{ alerteLibelle(a.type) }} · {{ a.detail }}</span></div>
-            </RouterLink>
+            <div v-if="alertes.length" class="alert-list">
+              <RouterLink v-for="a in alertes" :key="a.type + a.id" :to="alerteLien(a.type, a.id)" class="row alert-item">
+                <span class="tile" :class="a.niveau"><Icon name="alert" :size="18" /></span>
+                <div><b>{{ a.label }}</b><span>{{ alerteLibelle(a.type) }}<template v-if="a.detail"> · {{ a.detail }}</template></span></div>
+              </RouterLink>
+            </div>
           </div>
         </div>
 
         <div class="anchor">
-          <button class="avatar" :aria-label="`Compte de ${auth.user.name}`" :aria-expanded="popup === 'user'" @click="toggle('user')">{{ initials }}</button>
+          <button class="avatar" :aria-label="`Compte de ${auth.user.name}`" :aria-expanded="popup === 'user'" @click="toggle('user')"><img v-if="auth.user.photo" :src="fileUrl('utilisateurs', auth.user.photo)" alt="" class="avatar-img" /><template v-else>{{ initials }}</template></button>
           <div v-if="popup === 'user'" class="menu" role="menu">
             <div class="who"><b>{{ auth.user.name }}</b><span>{{ auth.user.email }} · {{ auth.user.role }}</span></div>
+            <RouterLink role="menuitem" to="/carte" class="row" @click="popup = ''"><Icon name="user" :size="18" /> Ma carte virtuelle</RouterLink>
             <button role="menuitem" @click="toggleTheme"><Icon :name="isDark ? 'sun' : 'moon'" :size="18" /> {{ isDark ? 'Mode clair' : 'Mode sombre' }}</button>
             <button role="menuitem" @click="doLogout"><Icon name="logout" :size="18" /> Se déconnecter</button>
           </div>

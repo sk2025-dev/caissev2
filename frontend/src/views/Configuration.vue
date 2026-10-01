@@ -9,15 +9,28 @@ import Icon from '../components/Icon.vue'
 import FileDrop from '../components/FileDrop.vue'
 import PhoneInput from '../components/PhoneInput.vue'
 import SearchSelect from '../components/SearchSelect.vue'
+import Ticket from '../components/Ticket.vue'
 
 const onglets = [['entreprise', 'Entreprise', 'briefcase'], ['apparence', 'Apparence', 'palette'], ['licence', "Durée d'utilisation", 'shield'], ['sauvegarde', 'Sauvegarde', 'database'], ['caisse', 'Caisse et tickets', 'wallet'], ['alertes', 'Alertes e-mail', 'mail']]
 const onglet = ref('entreprise')
 const cfg = ref(null)
 const erreurs = ref({})
 const busy = ref('')
-const f = reactive({ entreprise: {}, copyright: {}, theme: {}, licence: {}, session: {}, mail: {}, alertes: {}, caisse: {} })
+const f = reactive({ entreprise: {}, copyright: {}, theme: {}, documents: {}, licence: {}, session: {}, mail: {}, alertes: {}, caisse: {} })
 const nouveauPass = ref('')
 const logoFile = ref(null)
+
+const apercuTicket = computed(() => ({
+  numero: 'APERÇU', date_vente: new Date().toISOString().slice(0, 19).replace('T', ' '), caissier: 'Exemple', total: 2500,
+  lignes: [{ idligne: 1, designation: 'Article exemple', quantite: 2, prix_unitaire: 1250, total: 2500 }],
+  paiements: [{ idpaie: 1, libelle: 'Espèces', montant: 2500 }],
+  ticket: {
+    entreprise: { ...cfg.value?.entreprise, nom: cfg.value?.entreprise?.nom || 'Votre entreprise' },
+    largeur: Number(f.caisse.ticket_largeur), entete: f.caisse.ticket_entete, pied: f.caisse.ticket_pied,
+    afficher_logo: f.caisse.ticket_logo === '1', afficher_adresse: f.caisse.ticket_adresse === '1',
+    afficher_contact: f.caisse.ticket_contact === '1', afficher_identifiants: f.caisse.ticket_identifiants === '1',
+  },
+}))
 
 async function charger() {
   cfg.value = await api.get('config')
@@ -43,6 +56,7 @@ async function enregistrer(section, valeurs, message = 'Enregistré') {
 }
 
 /* ---- Entreprise ---- */
+const piedParDefaut = computed(() => { const e = f.entreprise; return [[e.nom, e.forme].filter(Boolean).join(' '), e.rccm && `RCCM ${e.rccm}`, e.nif && `NIF ${e.nif}`].filter(Boolean).join(' · ') || 'Mentions légales…' })
 async function saveEntreprise() {
   const copyright = JSON.parse(JSON.stringify(f.copyright))   // enregistrer() recharge les formulaires : on met la saisie de côté
   if (await enregistrer('entreprise', f.entreprise, "Informations de l'entreprise enregistrées")) await enregistrer('copyright', copyright, 'Copyright enregistré')
@@ -137,6 +151,14 @@ const message = (k) => erreurs.value[k]
           </div>
         </section>
         <section class="card cfg-card">
+          <h2>En-tête et pied de page des documents</h2><p class="muted">Repris sur les exports PDF et Excel (journal, ventes, stock, mouvements…), avec le logo, les coordonnées ci-dessus et les couleurs de la palette choisie.</p>
+          <div class="grid-form">
+            <div class="field full" :class="{ invalid: message('entete') }"><label for="d-ent">Mention d'en-tête</label><input id="d-ent" v-model="f.documents.entete" class="input" maxlength="150" placeholder="Ex. Votre partenaire au quotidien" /><span v-if="message('entete')" class="error">{{ message('entete') }}</span><small class="hint">Affichée sous le nom de l'entreprise. Facultatif.</small></div>
+            <div class="field full" :class="{ invalid: message('pied') }"><label for="d-pied">Pied de page</label><textarea id="d-pied" v-model="f.documents.pied" class="input" rows="2" maxlength="300" :placeholder="piedParDefaut" /><span v-if="message('pied')" class="error">{{ message('pied') }}</span><small class="hint">Laissé vide : nom, RCCM et NIF de l'entreprise.</small></div>
+          </div>
+          <div class="cfg-actions"><button class="btn primary" :disabled="busy === 'documents'" @click="enregistrer('documents', f.documents, 'En-tête et pied de page enregistrés')"><Icon name="check" :size="16" /> Enregistrer</button></div>
+        </section>
+        <section class="card cfg-card">
           <h2>Mention de copyright</h2><p class="muted">Pied de page de l'application. Le nom devient un lien cliquable si vous indiquez une adresse (par exemple le site de Dav'Consulting).</p>
           <div class="grid-form">
             <div class="field"><label for="c-cn">Nom affiché</label><input id="c-cn" v-model="f.copyright.nom" class="input" /></div>
@@ -180,12 +202,15 @@ const message = (k) => erreurs.value[k]
           </div>
         </section>
         <section class="card cfg-card">
-          <h2>Ticket de caisse</h2>
+          <h2>Personnaliser les tickets</h2>
+          <p class="muted">Ces informations figurent sur les tickets de vente et de commande, y compris avant la livraison. Le nom, les coordonnées, les identifiants et le logo se renseignent dans l'onglet Entreprise.</p>
           <div class="grid-form">
             <div class="field"><label for="k-lar">Largeur du papier</label><SearchSelect id="k-lar" v-model="f.caisse.ticket_largeur" :options="[{ value: '58', label: '58 mm' }, { value: '80', label: '80 mm' }]" /></div>
-            <div class="field full"><label for="k-ent">Message d'en-tête</label><input id="k-ent" v-model="f.caisse.ticket_entete" class="input" maxlength="200" /></div>
-            <div class="field full"><label for="k-pie">Message de pied de ticket</label><input id="k-pie" v-model="f.caisse.ticket_pied" class="input" maxlength="200" /></div>
+            <label v-for="[k, label] in [['logo', 'Afficher le logo'], ['adresse', 'Afficher l’adresse'], ['contact', 'Afficher téléphone, e-mail et site'], ['identifiants', 'Afficher RCCM et NIF']]" :key="k" class="toggle full"><input v-model="f.caisse['ticket_' + k]" type="checkbox" true-value="1" false-value="0" /><span class="sw" /> {{ label }}</label>
+            <div class="field full" :class="{ invalid: message('ticket_entete') }"><label for="k-ent">Informations d'en-tête</label><textarea id="k-ent" v-model="f.caisse.ticket_entete" class="input" rows="4" maxlength="1000" placeholder="Slogan, horaires, mentions complémentaires…" /><span class="hint">Plusieurs lignes possibles · 1 000 caractères maximum.</span><span v-if="message('ticket_entete')" class="error">{{ message('ticket_entete') }}</span></div>
+            <div class="field full" :class="{ invalid: message('ticket_pied') }"><label for="k-pie">Pied de page</label><textarea id="k-pie" v-model="f.caisse.ticket_pied" class="input" rows="4" maxlength="1000" placeholder="Remerciements, conditions de retour…" /><span v-if="message('ticket_pied')" class="error">{{ message('ticket_pied') }}</span></div>
           </div>
+          <div style="margin-top:18px;padding:16px;background:var(--surface-2);border-radius:12px"><p class="muted" style="margin-top:0">Aperçu du ticket</p><Ticket :vente="apercuTicket" /></div>
           <div class="cfg-actions"><button class="btn primary" :disabled="busy === 'caisse'" @click="enregistrer('caisse', f.caisse, 'Réglages de caisse enregistrés')"><Icon name="check" :size="16" /> Enregistrer</button></div>
         </section>
       </div>

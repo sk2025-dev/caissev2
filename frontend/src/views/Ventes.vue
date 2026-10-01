@@ -6,6 +6,7 @@ import { lookups, loadLookups } from '../lookups'
 import { money, dateHeure } from '../format'
 import { toast } from '../toast'
 import Icon from '../components/Icon.vue'
+import SearchSelect from '../components/SearchSelect.vue'
 import Pager from '../components/Pager.vue'
 import Ticket from '../components/Ticket.vue'
 import ExportButtons from '../components/ExportButtons.vue'
@@ -66,8 +67,8 @@ const badge = (r) => (r.statut === 'annulee' ? ['danger', 'Annulée'] : Number(r
     <div class="card">
       <div class="toolbar">
         <div class="search"><Icon name="search" :size="16" /><input v-model="f.q" class="input" type="search" placeholder="N° de ticket ou client…" aria-label="Rechercher une vente" /></div>
-        <select v-model="f.statut" class="input filter" aria-label="Statut"><option value="">Tous les statuts</option><option value="validee">Validées</option><option value="annulee">Annulées</option></select>
-        <select v-if="gerant" v-model="f.iduser" class="input filter" aria-label="Caissier"><option value="">Tous les caissiers</option><option v-for="c in lookups.caissiers" :key="c.id" :value="c.id">{{ c.nom }}</option></select>
+        <SearchSelect v-model="f.statut" class="filter" label="Statut" :options="[{ value: '', label: 'Tous les statuts' }, { value: 'validee', label: 'Validées' }, { value: 'annulee', label: 'Annulées' }]" />
+        <SearchSelect v-if="gerant" v-model="f.iduser" class="filter" label="Caissier" :options="[{ value: '', label: 'Tous les caissiers' }, ...lookups.caissiers.map((c) => ({ value: c.id, label: c.nom }))]" />
         <label class="check"><input v-model="f.credit" type="checkbox" /><span>À crédit</span></label>
         <input v-model="f.from" class="input date" type="date" aria-label="Du" /><input v-model="f.to" class="input date" type="date" aria-label="Au" />
       </div>
