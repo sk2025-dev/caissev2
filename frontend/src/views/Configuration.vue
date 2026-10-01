@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { api, request, ApiError } from '../api'
 import { appConfig, apercu, logoUrl, chargerConfigPublique } from '../theme'
 import { exportsStore, startExport, downloadUrl } from '../exports'
@@ -55,15 +55,17 @@ async function enregistrer(section, valeurs, message = 'Enregistré') {
     if (!(e instanceof ApiError)) throw e
     erreurs.value = e.errors || {}
     toast(Object.values(e.errors || {})[0] || e.message, 'error')
+    nextTick(() => {   // le champ fautif peut se trouver dans une autre carte, hors de l'écran
+      const champ = document.querySelector('.cfg-section .field.invalid')
+      champ?.scrollIntoView({ behavior: 'smooth', block: 'center' }); champ?.querySelector('input, textarea')?.focus({ preventScroll: true })
+    })
     return false
   } finally { busy.value = '' }
 }
 
 /* ---- Entreprise ---- */
 const piedParDefaut = computed(() => { const e = f.entreprise; return [[e.nom, e.forme].filter(Boolean).join(' '), e.rccm && `RCCM ${e.rccm}`, e.nif && `NIF ${e.nif}`].filter(Boolean).join(' · ') || 'Mentions légales…' })
-async function saveEntreprise() {
-  if (await enregistrer('entreprise', f.entreprise, "Informations de l'entreprise enregistrées")) await enregistrer('copyright', f.copyright, 'Copyright enregistré')
-}
+const saveEntreprise = () => enregistrer('entreprise', f.entreprise, "Informations de l'entreprise enregistrées")
 async function envoyerLogo(file) {
   logoFile.value = file
   if (!file) return
@@ -144,7 +146,7 @@ const message = (k) => erreurs.value[k]
             <div class="field"><label for="c-forme">Forme juridique</label><input id="c-forme" v-model="f.entreprise.forme" class="input" placeholder="SARL, SA, SAS…" /></div>
             <div class="field"><label>Téléphone</label><PhoneInput v-model="f.entreprise.telephone" /></div>
             <div class="field" :class="{ invalid: message('email') }"><label for="c-mail">E-mail</label><input id="c-mail" v-model="f.entreprise.email" type="email" class="input" /><span v-if="message('email')" class="error">{{ message('email') }}</span></div>
-            <div class="field" :class="{ invalid: message('site') }"><label for="c-site">Site web</label><input id="c-site" v-model="f.entreprise.site" class="input" placeholder="https://" /><span v-if="message('site')" class="error">{{ message('site') }}</span></div>
+            <div class="field" :class="{ invalid: message('site') }"><label for="c-site">Site web</label><input id="c-site" v-model="f.entreprise.site" class="input" placeholder="www.exemple.com" /><span v-if="message('site')" class="error">{{ message('site') }}</span></div>
             <div class="field full"><label for="c-adr">Adresse</label><input id="c-adr" v-model="f.entreprise.adresse" class="input" /></div>
             <div class="field"><label for="c-ville">Ville</label><input id="c-ville" v-model="f.entreprise.ville" class="input" /></div>
             <div class="field"><label for="c-pays">Pays</label><input id="c-pays" v-model="f.entreprise.pays" class="input" /></div>
@@ -152,6 +154,7 @@ const message = (k) => erreurs.value[k]
             <div class="field"><label for="c-nif">N° d'identification fiscale</label><input id="c-nif" v-model="f.entreprise.nif" class="input" /></div>
             <div class="field" :class="{ invalid: message('devise') }"><label for="c-dev">Devise <span class="req">*</span></label><input id="c-dev" v-model="f.entreprise.devise" class="input" maxlength="10" /><span class="hint">Affichée après chaque montant (FCFA, XOF, EUR…).</span></div>
           </div>
+          <div class="cfg-actions"><button class="btn primary" :disabled="busy === 'entreprise'" @click="saveEntreprise"><Icon name="check" :size="16" /> Enregistrer</button></div>
         </section>
         <section class="card cfg-card">
           <h2>En-tête et pied de page des documents</h2><p class="muted">Repris sur les exports PDF et Excel (journal, ventes, stock, mouvements…), avec le logo, les coordonnées ci-dessus et les couleurs de la palette choisie.</p>
@@ -165,9 +168,9 @@ const message = (k) => erreurs.value[k]
           <h2>Mention de copyright</h2><p class="muted">Pied de page de l'application. Le nom devient un lien cliquable si vous indiquez une adresse (par exemple le site de Dav'Consulting).</p>
           <div class="grid-form">
             <div class="field"><label for="c-cn">Nom affiché</label><input id="c-cn" v-model="f.copyright.nom" class="input" /></div>
-            <div class="field" :class="{ invalid: message('url') }"><label for="c-cu">Lien (site web)</label><input id="c-cu" v-model="f.copyright.url" class="input" placeholder="https://www.dav-consulting.com" /><span v-if="message('url')" class="error">{{ message('url') }}</span></div>
+            <div class="field" :class="{ invalid: message('url') }"><label for="c-cu">Lien (site web)</label><input id="c-cu" v-model="f.copyright.url" class="input" placeholder="www.dav-consulting.com" /><span v-if="message('url')" class="error">{{ message('url') }}</span></div>
           </div>
-          <div class="cfg-actions"><button class="btn primary" :disabled="busy === 'entreprise' || busy === 'copyright'" @click="saveEntreprise"><Icon name="check" :size="16" /> Enregistrer</button></div>
+          <div class="cfg-actions"><button class="btn primary" :disabled="busy === 'copyright'" @click="enregistrer('copyright', f.copyright, 'Copyright enregistré')"><Icon name="check" :size="16" /> Enregistrer</button></div>
         </section>
       </div>
 

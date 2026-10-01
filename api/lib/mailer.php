@@ -12,8 +12,11 @@ class Mailer
 
     private static function enc($s) { return '=?UTF-8?B?' . base64_encode($s) . '?='; }
 
-    /** Construit le message MIME multipart/alternative. */
-    public function build(array $to, $sujet, $html, $texte)
+    /**
+     * Construit le message MIME multipart/alternative (texte + HTML).
+     * $images : images intégrées au HTML, [cid => chemin du fichier], appelées par <img src="cid:...">  -> multipart/related.
+     */
+    public function build(array $to, $sujet, $html, $texte, array $images = [])
     {
         $fromMail = $this->cfg['expediteur'];
         $fromNom = $this->cfg['expediteur_nom'] ?: 'Caisse';
@@ -26,19 +29,30 @@ class Mailer
             'Message-ID: <' . bin2hex(random_bytes(10)) . '@' . (substr(strrchr($fromMail, '@'), 1) ?: 'caisse.local') . '>',
             'MIME-Version: 1.0',
             'X-Mailer: Caisse',
-            "Content-Type: multipart/alternative; boundary=\"$b\"",
         ];
         $part = function ($type, $contenu) use ($b) {
             return "--$b\r\nContent-Type: $type; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" . chunk_split(base64_encode($contenu)) . "\r\n";
         };
-        return ['headers' => $h, 'body' => $part('text/plain', $texte) . $part('text/html', $html) . "--$b--\r\n"];
+        $alt = $part('text/plain', $texte) . $part('text/html', $html) . "--$b--\r\n";
+        $mimes = ['png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'webp' => 'image/webp', 'gif' => 'image/gif'];
+        $images = array_filter($images, function ($f) use ($mimes) { return is_file($f) && isset($mimes[strtolower(pathinfo($f, PATHINFO_EXTENSION))]); });
+        if (!$images) { $h[] = "Content-Type: multipart/alternative; boundary=\"$b\""; return ['headers' => $h, 'body' => $alt]; }
+
+        $r = 'r_' . bin2hex(random_bytes(8));
+        $h[] = "Content-Type: multipart/related; type=\"multipart/alternative\"; boundary=\"$r\"";
+        $corps = "--$r\r\nContent-Type: multipart/alternative; boundary=\"$b\"\r\n\r\n" . $alt;
+        foreach ($images as $cid => $f) {
+            $nom = basename($f);
+            $corps .= "--$r\r\nContent-Type: " . $mimes[strtolower(pathinfo($f, PATHINFO_EXTENSION))] . "; name=\"$nom\"\r\nContent-Transfer-Encoding: base64\r\nContent-ID: <$cid>\r\nContent-Disposition: inline; filename=\"$nom\"\r\n\r\n" . chunk_split(base64_encode(file_get_contents($f))) . "\r\n";
+        }
+        return ['headers' => $h, 'body' => $corps . "--$r--\r\n"];
     }
 
-    public function send(array $to, $sujet, $html, $texte)
+    public function send(array $to, $sujet, $html, $texte, array $images = [])
     {
         if (!$to) throw new RuntimeException('Aucun destinataire');
         if (!filter_var($this->cfg['expediteur'], FILTER_VALIDATE_EMAIL)) throw new RuntimeException("Adresse d'expédition invalide");
-        $m = $this->build($to, $sujet, $html, $texte);
+        $m = $this->build($to, $sujet, $html, $texte, $images);
         if ($this->cfg['transport'] === 'smtp') return $this->smtp($to, $m);
         // Transport « mail() » : l'hébergeur se charge de l'acheminement
         $hdr = array_values(array_filter($m['headers'], function ($l) { return stripos($l, 'To:') !== 0 && stripos($l, 'Subject:') !== 0; }));

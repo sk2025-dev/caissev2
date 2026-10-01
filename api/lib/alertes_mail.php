@@ -12,36 +12,126 @@ function alertes_destinataires($txt)
     return array_values($out);
 }
 
-/** Rassemble les alertes activées par rubrique : [ [titre, lignes[[label, detail, niveau]]] ]. */
+/** Rassemble les alertes activées par rubrique : [ [titre, nb, lignes[[label, detail, niveau]]] ]. */
 function alertes_collecter(PDO $db, array $all)
 {
     $titres = ['rupture' => 'Produits en rupture de stock', 'stock_bas' => 'Stocks sous le seuil d\'alerte', 'creances' => 'Créances clients anciennes', 'ecart_caisse' => 'Écarts de caisse (7 derniers jours)', 'licence' => "Licence d'utilisation"];
     $par = [];
-    foreach (alertes_liste($db, $all) as $x) $par[$x['type']][] = ['label' => $x['label'], 'detail' => $x['detail'], 'niveau' => $x['niveau']];
+    foreach (alertes_liste($db, $all) as $x) $par[$x['type']][] = ['label' => $x['label'], 'detail' => $x['detail'] !== '' ? $x['detail'] : ($x['type'] === 'rupture' ? 'en rupture' : ''), 'niveau' => $x['niveau']];
     $sections = [];
-    foreach ($titres as $type => $titre) if (!empty($par[$type])) $sections[] = ['titre' => $titre . ' (' . count($par[$type]) . ')', 'lignes' => array_slice($par[$type], 0, 15)];
+    foreach ($titres as $type => $titre) if (!empty($par[$type])) $sections[] = ['titre' => $titre, 'nb' => count($par[$type]), 'lignes' => array_slice($par[$type], 0, 15)];
     return $sections;
+}
+
+/* ---------- Gabarit HTML aux couleurs de l'application ---------- */
+
+/** Couleurs de la palette choisie (mêmes valeurs que l'interface, mode clair). */
+function mail_couleurs(array $all)
+{
+    $secondaire = ['violet' => '9775FA', 'ocean' => '4DABF7', 'emeraude' => '38D9A9', 'sunset' => 'FF922B', 'rose' => 'F06595', 'ardoise' => '748095'];
+    $pal = isset(PALETTES_COULEURS[$all['theme.palette']]) ? $all['theme.palette'] : 'violet';
+    $c = PALETTES_COULEURS[$pal];
+    return ['p1' => '#' . $c['principale'], 'p2' => '#' . $secondaire[$pal], 'douce' => '#' . $c['douce'], 'pale' => '#' . $c['pale'], 'trait' => '#' . $c['trait'], 'bordure' => '#' . $c['bordure'],
+        'texte' => '#2a2340', 'muet' => '#7b7393', 'fond' => '#f5eee7',
+        'danger' => '#e64980', 'danger_doux' => '#fde6ee', 'warning' => '#e8890c', 'warning_doux' => '#fff0d4', 'succes' => '#2b9e6b', 'succes_doux' => '#ddf4e8'];
+}
+
+/**
+ * Habille un contenu HTML : en-tête dégradé avec logo, carte blanche, pied avec les coordonnées de l'entreprise.
+ * Mise en page en tableaux et styles en ligne (compatibles Gmail, Outlook, Apple Mail).
+ * Renvoie [html, images intégrées (cid => fichier)].
+ */
+function mail_gabarit(array $all, $titre, $sousTitre, $contenu, $apercu = '')
+{
+    $c = mail_couleurs($all);
+    $e = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
+    $ent = $all['entreprise.nom'] ?: 'Caisse';
+    $police = "font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+
+    $images = [];
+    $logo = $all['entreprise.logo'] !== '' ? dirname(__DIR__, 2) . '/doc/logo/' . basename($all['entreprise.logo']) : '';
+    if ($logo !== '' && is_file($logo)) {
+        $images['logo'] = $logo;
+        $embleme = '<img src="cid:logo" alt="' . $e($ent) . '" width="48" style="display:block;max-width:48px;max-height:48px;border:0">';
+    } else {
+        $embleme = '<span style="' . $police . ';font-size:24px;font-weight:700;color:' . $c['p1'] . '">' . $e(mb_strtoupper(mb_substr($ent, 0, 1))) . '</span>';
+    }
+
+    $coord = array_filter([trim($all['entreprise.adresse'] . ($all['entreprise.ville'] !== '' ? ', ' . $all['entreprise.ville'] : ''), ', '), $all['entreprise.telephone'] !== '' ? 'Tél. ' . $all['entreprise.telephone'] : '', $all['entreprise.email'], $all['entreprise.site']], 'strlen');
+
+    $h = '<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>' . $e($titre) . '</title></head>'
+        . '<body style="margin:0;padding:0;background:' . $c['fond'] . '">'
+        . '<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">' . $e($apercu ?: $sousTitre) . '</div>'
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:' . $c['fond'] . '"><tr><td align="center" style="padding:28px 12px">'
+        . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background:#ffffff;border-radius:22px;overflow:hidden;box-shadow:0 10px 30px rgba(74,48,120,.10)">'
+        // En-tête
+        . '<tr><td bgcolor="' . $c['p1'] . '" style="background:' . $c['p1'] . ';background-image:linear-gradient(135deg,' . $c['p1'] . ',' . $c['p2'] . ');padding:26px 30px 28px">'
+        . '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>'
+        . '<td width="64" height="64" align="center" valign="middle" bgcolor="#ffffff" style="width:64px;height:64px;background:#ffffff;border-radius:18px">' . $embleme . '</td>'
+        . '<td style="padding-left:14px;' . $police . ';font-size:15px;font-weight:600;color:#ffffff;opacity:.92">' . $e($ent) . '</td>'
+        . '</tr></table>'
+        . '<div style="' . $police . ';font-size:24px;line-height:1.25;font-weight:700;color:#ffffff;margin-top:20px">' . $e($titre) . '</div>'
+        . '<div style="' . $police . ';font-size:14px;color:#ffffff;opacity:.85;margin-top:6px">' . $e($sousTitre) . '</div>'
+        . '</td></tr>'
+        // Contenu
+        . '<tr><td style="padding:26px 30px 8px;' . $police . ';font-size:14px;line-height:1.55;color:' . $c['texte'] . '">' . $contenu . '</td></tr>'
+        // Pied
+        . '<tr><td style="padding:18px 30px 26px;' . $police . '">'
+        . '<div style="border-top:1px solid ' . $c['trait'] . ';padding-top:16px;font-size:12px;line-height:1.6;color:' . $c['muet'] . '">'
+        . ($coord ? '<div style="font-weight:600;color:' . $c['texte'] . '">' . $e($ent) . '</div><div>' . $e(implode(' · ', $coord)) . '</div>' : '')
+        . '<div style="margin-top:8px">Message automatique de l\'application de caisse. Destinataires et alertes : Configuration → Alertes e-mail.</div>'
+        . '</div></td></tr>'
+        . '</table>'
+        . ($all['copyright.nom'] !== '' ? '<div style="' . $police . ';font-size:11px;color:' . $c['muet'] . ';margin-top:14px">© ' . date('Y') . ' ' . $e($all['copyright.nom']) . '</div>' : '')
+        . '</td></tr></table></body></html>';
+    return [$h, $images];
+}
+
+/** Encadré coloré (succès, information). */
+function mail_encadre(array $all, $icone, $titre, $texte, $ton = 'succes')
+{
+    $c = mail_couleurs($all);
+    $fond = $ton === 'succes' ? $c['succes_doux'] : $c['pale']; $coul = $ton === 'succes' ? $c['succes'] : $c['p1'];
+    return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:' . $fond . ';border-radius:16px"><tr>'
+        . '<td width="46" valign="top" style="padding:18px 0 18px 18px;font-size:24px;line-height:1">' . $icone . '</td>'
+        . '<td style="padding:18px 18px 18px 12px"><div style="font-weight:700;font-size:15px;color:' . $coul . '">' . htmlspecialchars($titre) . '</div><div style="margin-top:4px">' . htmlspecialchars($texte) . '</div></td>'
+        . '</tr></table><div style="height:18px;line-height:18px">&nbsp;</div>';
 }
 
 function alertes_message(array $sections, array $all)
 {
+    $c = mail_couleurs($all);
     $ent = $all['entreprise.nom'] ?: 'Caisse';
-    $n = array_sum(array_map(function ($s) { return count($s['lignes']); }, $sections));
-    $sujet = "[$ent] $n alerte" . ($n > 1 ? 's' : '') . ' à traiter';
-    $couleur = ['danger' => '#e64980', 'warning' => '#e8890c'];
-    $h = '<div style="font-family:Arial,Helvetica,sans-serif;max-width:620px;margin:auto;color:#2a2340"><div style="background:#7048e8;color:#fff;padding:22px 26px;border-radius:16px 16px 0 0"><div style="font-size:13px;opacity:.85">' . htmlspecialchars($ent) . '</div><div style="font-size:21px;font-weight:bold;margin-top:4px">' . $n . ' point' . ($n > 1 ? 's' : '') . " à surveiller</div><div style=\"font-size:13px;opacity:.85;margin-top:2px\">Résumé du " . date('d/m/Y') . '</div></div><div style="border:1px solid #e2def0;border-top:0;border-radius:0 0 16px 16px;padding:8px 26px 22px">';
-    $t = "$ent — résumé du " . date('d/m/Y') . "\n\n";
+    $n = array_sum(array_column($sections, 'nb'));
+    $pluriel = $n > 1 ? 's' : '';
+    $sujet = "[$ent] $n alerte$pluriel à traiter";
+    $titre = "$n point$pluriel à surveiller";
+    $sous = 'Résumé du ' . date('d/m/Y');
+
+    $html = '<p style="margin:0 0 20px">Voici les points qui demandent votre attention aujourd\'hui.</p>';
+    $t = "$ent — résumé du " . date('d/m/Y') . "\n$titre\n\n";
     foreach ($sections as $s) {
-        $h .= '<h3 style="margin:22px 0 8px;font-size:15px">' . htmlspecialchars($s['titre']) . '</h3><table style="width:100%;border-collapse:collapse">';
-        $t .= strtoupper($s['titre']) . "\n";
-        foreach ($s['lignes'] as $l) {
-            $h .= '<tr><td style="padding:8px 0;border-bottom:1px solid #eee;font-weight:bold">' . htmlspecialchars($l['label']) . '</td><td style="padding:8px 0;border-bottom:1px solid #eee;text-align:right;color:' . $couleur[$l['niveau']] . ';font-weight:bold">' . htmlspecialchars($l['detail']) . '</td></tr>';
+        $html .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ' . $c['bordure'] . ';border-radius:16px;border-collapse:separate;margin-bottom:16px">'
+            . '<tr><td bgcolor="' . $c['pale'] . '" style="background:' . $c['pale'] . ';border-radius:16px 16px 0 0;padding:12px 16px;border-bottom:1px solid ' . $c['trait'] . '">'
+            . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="font-weight:700;font-size:15px;color:' . $c['texte'] . '">' . htmlspecialchars($s['titre']) . '</td>'
+            . '<td align="right"><span style="display:inline-block;background:' . $c['douce'] . ';color:' . $c['p1'] . ';font-weight:700;font-size:12px;padding:3px 10px;border-radius:999px">' . $s['nb'] . '</span></td></tr></table></td></tr>';
+        $t .= mb_strtoupper($s['titre']) . ' (' . $s['nb'] . ")\n";
+        $dernier = count($s['lignes']) - 1;
+        foreach ($s['lignes'] as $i => $l) {
+            $danger = $l['niveau'] === 'danger';
+            $bord = $i < $dernier ? 'border-bottom:1px solid ' . $c['trait'] . ';' : '';
+            $html .= '<tr><td style="padding:0 16px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>'
+                . '<td style="' . $bord . 'padding:11px 0;font-weight:600;color:' . $c['texte'] . '"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' . ($danger ? $c['danger'] : $c['warning']) . ';margin-right:8px;vertical-align:middle"></span>' . htmlspecialchars($l['label']) . '</td>'
+                . '<td align="right" style="' . $bord . 'padding:11px 0 11px 10px">' . ($l['detail'] !== '' ? '<span style="display:inline-block;background:' . ($danger ? $c['danger_doux'] : $c['warning_doux']) . ';color:' . ($danger ? $c['danger'] : $c['warning']) . ';font-weight:600;font-size:12px;padding:4px 10px;border-radius:999px;white-space:nowrap">' . htmlspecialchars($l['detail']) . '</span>' : '') . '</td>'
+                . '</tr></table></td></tr>';
             $t .= ' - ' . $l['label'] . ($l['detail'] !== '' ? ' : ' . $l['detail'] : '') . "\n";
         }
-        $h .= '</table>'; $t .= "\n";
+        if ($s['nb'] > count($s['lignes'])) $html .= '<tr><td style="padding:10px 16px;color:' . $c['muet'] . ';font-size:12px;border-top:1px solid ' . $c['trait'] . '">… et ' . ($s['nb'] - count($s['lignes'])) . ' autre(s) dans l\'application</td></tr>';
+        $html .= '</table>';
+        $t .= "\n";
     }
-    $h .= '<p style="color:#7b7393;font-size:12px;margin:22px 0 0">Message automatique de l\'application de caisse. Les seuils et destinataires se règlent dans Configuration → Alertes e-mail.</p></div></div>';
-    return [$sujet, $h, $t];
+    list($h, $images) = mail_gabarit($all, $titre, $sous, $html, "$titre — " . implode(', ', array_map(function ($s) { return $s['titre'] . ' (' . $s['nb'] . ')'; }, $sections)));
+    return [$sujet, $h, $t, $images];
 }
 
 function mail_journaliser(PDO $db, $type, array $to, $sujet, $statut, $nb, $erreur = '')
@@ -67,17 +157,18 @@ function alertes_envoyer(PDO $db, $force = false, $type = 'alertes')
     $to = alertes_destinataires($all['mail.destinataires']);
     if (!$to) throw new ApiError(422, 'Données invalides', ['destinataires' => 'Aucun destinataire valide']);
     $sections = alertes_collecter($db, $all);
-    $n = array_sum(array_map(function ($s) { return count($s['lignes']); }, $sections));
+    $n = array_sum(array_column($sections, 'nb'));
     if ($n === 0 && !$force) { mail_journaliser($db, $type, $to, '', 'rien', 0); return ['envoye' => false, 'nb' => 0, 'message' => 'Rien à signaler']; }
     if ($n === 0) {   // envoi manuel sans alerte : message de confirmation
         $ent = $all['entreprise.nom'] ?: 'Caisse';
         $sujet = "[$ent] Aucune alerte à signaler";
-        $html = '<p style="font-family:Arial">Aucune échéance ni retard à signaler au ' . date('d/m/Y') . '. ✅</p>'; $texte = "Aucune échéance ni retard à signaler au " . date('d/m/Y') . ".\n";
+        list($html, $images) = mail_gabarit($all, 'Tout est en ordre', 'Résumé du ' . date('d/m/Y'), mail_encadre($all, '✅', 'Aucune alerte', 'Aucune échéance ni retard à signaler au ' . date('d/m/Y') . '.'));
+        $texte = "Aucune échéance ni retard à signaler au " . date('d/m/Y') . ".\n";
     } else {
-        list($sujet, $html, $texte) = alertes_message($sections, $all);
+        list($sujet, $html, $texte, $images) = alertes_message($sections, $all);
     }
     try {
-        mailer_depuis($all)->send($to, $sujet, $html, $texte);
+        mailer_depuis($all)->send($to, $sujet, $html, $texte, $images);
         mail_journaliser($db, $type, $to, $sujet, 'envoye', $n);
         return ['envoye' => true, 'nb' => $n, 'destinataires' => $to];
     } catch (Throwable $e) {
@@ -95,7 +186,10 @@ function alertes_test(PDO $db)
     $sujet = "[$ent] E-mail de test";
     $mailer = mailer_depuis($all);
     try {
-        $mailer->send($to, $sujet, '<div style="font-family:Arial"><h3>Configuration des e-mails ✅</h3><p>Ce message confirme que l\'application de caisse peut envoyer les alertes à cette adresse.</p></div>', "Configuration des e-mails OK.\nL\'application de caisse peut envoyer les alertes à cette adresse.\n");
+        list($html, $images) = mail_gabarit($all, 'E-mail de test', 'Envoyé le ' . date('d/m/Y à H:i'),
+            mail_encadre($all, '✅', 'Configuration des e-mails réussie', "L'application de caisse peut envoyer les alertes à cette adresse.")
+            . '<p style="margin:0 0 18px">Vous recevrez ici le résumé ' . ($all['alertes.frequence'] === 'hebdomadaire' ? 'de chaque lundi' : 'quotidien') . ' des ruptures, stocks bas, créances, écarts de caisse et échéances de licence.</p>');
+        $mailer->send($to, $sujet, $html, "Configuration des e-mails OK.\nL'application de caisse peut envoyer les alertes à cette adresse.\n", $images);
         mail_journaliser($db, 'test', $to, $sujet, 'envoye', 0);
         return ['envoye' => true, 'destinataires' => $to];
     } catch (Throwable $e) {

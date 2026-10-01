@@ -3,6 +3,14 @@
 
 function cfg_err($champ, $msg) { throw new ApiError(422, 'Données invalides', [$champ => $msg]); }
 
+/** Adresse web, conservée telle que saisie : "www.exemple.com" ou "https://www.exemple.com". */
+function cfg_url(array $in, $k, $max, $defaut)
+{
+    $v = cfg_texte($in, $k, $max, $defaut);
+    if ($v !== '' && !preg_match('#^(https?://)?[^\s/$.?\#]+\.[^\s]+$#i', $v)) cfg_err($k, "Adresse invalide (ex. www.exemple.com)");
+    return $v;
+}
+
 function cfg_texte(array $in, $k, $max, $defaut = '')
 {
     $v = isset($in[$k]) ? trim((string)$in[$k]) : $defaut;
@@ -19,8 +27,7 @@ function config_valider($section, array $in, array $all)
             foreach (['nom' => 120, 'forme' => 60, 'adresse' => 200, 'ville' => 80, 'pays' => 80, 'telephone' => 40, 'rccm' => 60, 'nif' => 60] as $k => $max) $o["entreprise.$k"] = cfg_texte($in, $k, $max, $all["entreprise.$k"]);
             $email = cfg_texte($in, 'email', 150, $all['entreprise.email']);
             if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) cfg_err('email', 'E-mail invalide');
-            $site = cfg_texte($in, 'site', 200, $all['entreprise.site']);
-            if ($site !== '' && !preg_match('#^https?://[^\s/$.?\#].[^\s]*$#i', $site)) cfg_err('site', "Adresse invalide (commence par http:// ou https://)");
+            $site = cfg_url($in, 'site', 200, $all['entreprise.site']);
             $dev = cfg_texte($in, 'devise', 10, $all['entreprise.devise']);
             if ($dev === '') cfg_err('devise', 'Devise obligatoire');
             $o['entreprise.email'] = $email; $o['entreprise.site'] = $site; $o['entreprise.devise'] = $dev;
@@ -29,8 +36,7 @@ function config_valider($section, array $in, array $all)
             break;
         case 'copyright':
             $o['copyright.nom'] = cfg_texte($in, 'nom', 120, $all['copyright.nom']);
-            $url = cfg_texte($in, 'url', 200, $all['copyright.url']);
-            if ($url !== '' && !preg_match('#^https?://[^\s/$.?\#].[^\s]*$#i', $url)) cfg_err('url', "Adresse invalide (commence par http:// ou https://)");
+            $url = cfg_url($in, 'url', 200, $all['copyright.url']);
             $o['copyright.url'] = $url;
             break;
         case 'theme':
