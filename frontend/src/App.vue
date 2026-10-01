@@ -1,7 +1,7 @@
 <script setup>
-import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, computed, provide, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { auth, api, logout, prenomDe } from './api'
+import { auth, api, logout, prenomDe, estCaissier } from './api'
 import { showSplash, hideSplash, pause } from './splash'
 import SplashScreen from './components/SplashScreen.vue'
 import { toasts } from './toast'
@@ -29,6 +29,9 @@ function basculerMenu() {
 const raccourciMenu = (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') { e.preventDefault(); basculerMenu() } }
 onMounted(() => document.addEventListener('keydown', raccourciMenu))
 onBeforeUnmount(() => document.removeEventListener('keydown', raccourciMenu))
+// Caissier : pas de menu latéral ; la caisse occupe tout l'écran et porte sa propre barre
+const kiosque = computed(() => estCaissier())
+const surCaisse = computed(() => route.path === '/caisse')
 const popup = ref('') // '', 'bell', 'user'
 const alertes = ref([])
 watch(() => route.fullPath, () => { menuOpen.value = false; popup.value = '' })
@@ -45,6 +48,8 @@ const nav = computed(() => [
   { to: '/', label: 'Tableau de bord', icon: 'dashboard' },
   { to: '/caisse', label: 'Caisse', icon: 'cart', droit: 'caisse' },
   { to: '/ventes', label: 'Ventes', icon: 'receipt', droit: ['caisse', 'ventes_toutes'] },
+  { to: '/commandes', label: 'Commandes et livraisons', icon: 'truck', droit: 'commandes' },
+  { to: '/mouvements', label: 'Mouvements de caisse', icon: 'swap', droit: ['caisse', 'ventes_toutes'] },
   { to: '/sessions', label: 'Sessions de caisse', icon: 'cash', droit: ['caisse', 'ventes_toutes'] },
   { sep: 'Catalogue' },
   { to: '/produits', label: 'Produits et services', icon: 'tag' },
@@ -54,7 +59,7 @@ const nav = computed(() => [
   { sep: 'Tiers' },
   { to: '/clients', label: 'Clients', icon: 'user' },
   { to: '/fournisseurs', label: 'Fournisseurs', icon: 'briefcase', droit: 'fournisseurs' },
-  ...(auth.user?.admin ? [{ sep: 'Administration' }, { to: '/caisses', label: 'Caisses', icon: 'wallet' }, { to: '/utilisateurs', label: 'Utilisateurs', icon: 'users' }] : []),
+  ...(auth.user?.admin ? [{ sep: 'Administration' }, { to: '/caisses', label: 'Caisses', icon: 'wallet' }, { to: '/zones-livraison', label: 'Tarifs de livraison', icon: 'truck' }, { to: '/utilisateurs', label: 'Utilisateurs', icon: 'users' }] : []),
   ...(auth.user?.super ? [{ to: '/configuration', label: 'Configuration', icon: 'settings' }] : []),
 ].filter((n) => n.sep || droit(n.droit)))
 // Entrée de menu active aussi sur ses sous-pages (ex. /vehicules/3) ; « / » uniquement en exact
@@ -86,11 +91,12 @@ async function doLogout() {
   await pause(250)                               // laisse la page de connexion se poser avant de retirer l'écran
   hideSplash()
 }
+provide('deconnecter', doLogout)
 </script>
 
 <template>
-  <div v-if="auth.user" class="shell" :class="{ masque }">
-    <aside id="menu-lateral" class="sidebar" :class="{ open: menuOpen }" :aria-hidden="masque && !menuOpen ? 'true' : undefined" :inert="masque && !menuOpen">
+  <div v-if="auth.user" class="shell" :class="{ masque, kiosque }">
+    <aside v-if="!kiosque" id="menu-lateral" class="sidebar" :class="{ open: menuOpen }" :aria-hidden="masque && !menuOpen ? 'true' : undefined" :inert="masque && !menuOpen">
       <div class="brand"><img v-if="logoUrl" :src="logoUrl" alt="" class="brand-logo" /><span v-else class="logo"><Icon name="cart" :size="21" /></span> {{ nomApp }}</div>
       <nav class="nav" aria-label="Navigation principale">
         <template v-for="n in nav" :key="n.to || n.sep">
@@ -106,12 +112,13 @@ async function doLogout() {
         <span class="art"><Illus name="coins" :size="58" /></span>
       </div>
     </aside>
-    <div v-if="menuOpen" class="scrim" @click="menuOpen = false" />
+    <div v-if="menuOpen && !kiosque" class="scrim" @click="menuOpen = false" />
 
     <div class="main">
-      <header class="header">
-        <button class="pillbtn menu-btn" :aria-label="masque ? 'Afficher le menu' : 'Masquer le menu'" :title="(masque ? 'Afficher' : 'Masquer') + ' le menu (Ctrl/⌘ + B)'" aria-controls="menu-lateral" :aria-expanded="mobile() ? menuOpen : !masque" @click="basculerMenu"><Icon :name="mobile() ? 'menu' : 'sidebar'" /></button>
-        <span v-if="masque" class="mini-brand"><img v-if="logoUrl" :src="logoUrl" alt="" /><span v-else class="logo"><Icon name="cart" :size="18" /></span><b>{{ nomApp }}</b></span>
+      <header v-if="!(kiosque && surCaisse)" class="header">
+        <RouterLink v-if="kiosque" to="/caisse" class="btn"><Icon name="cart" :size="18" /> Retour à la caisse</RouterLink>
+        <button v-else class="pillbtn menu-btn" :aria-label="masque ? 'Afficher le menu' : 'Masquer le menu'" :title="(masque ? 'Afficher' : 'Masquer') + ' le menu (Ctrl/⌘ + B)'" aria-controls="menu-lateral" :aria-expanded="mobile() ? menuOpen : !masque" @click="basculerMenu"><Icon :name="mobile() ? 'menu' : 'sidebar'" /></button>
+        <span v-if="masque && !kiosque" class="mini-brand"><img v-if="logoUrl" :src="logoUrl" alt="" /><span v-else class="logo"><Icon name="cart" :size="18" /></span><b>{{ nomApp }}</b></span>
         <GlobalSearch />
         <div class="grow" />
 
@@ -146,7 +153,7 @@ async function doLogout() {
       <RouterView v-slot="{ Component }">
         <Transition name="page" mode="out-in"><component :is="Component" :key="route.path" /></Transition>
       </RouterView>
-      <AppFooter />
+      <AppFooter v-if="!(kiosque && surCaisse)" />
     </div>
   </div>
   <template v-else>

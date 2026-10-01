@@ -53,6 +53,8 @@ export async function restoreSession() {
   auth.ready = true
 }
 
+// Caissier « pur » : peut vendre mais ni administrer ni consulter toutes les ventes -> interface de caisse plein écran, sans menu latéral
+export const estCaissier = (u = auth.user) => !!(u?.droits?.caisse && !u.droits.ventes_toutes && !u.admin && !u.super)
 export const prenomDe = (u) => (u?.prenom || (u?.name || '').split(' ')[0] || '').trim()
 
 export async function login(email, password) {

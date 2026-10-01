@@ -118,6 +118,29 @@ export const resources = {
     ],
   },
 
+  'zones-livraison': {
+    pk: 'idzone', refreshLookups: true, write: (u) => !!u?.admin,
+    title: 'Tarifs de livraison', singular: 'tarif', subtitle: 'Prix de la livraison par lieu : quartiers d\'Abidjan, villes de l\'intérieur, pays voisins',
+    searchPlaceholder: 'Quartier, commune, ville…',
+    filters: [{ key: 'zone', label: 'Zone', options: [{ value: '', label: 'Toutes les zones' }, { value: 'abidjan', label: 'Abidjan' }, { value: 'interieur', label: 'Intérieur du pays' }, { value: 'exterieur', label: 'Extérieur' }] }],
+    columns: [
+      { key: 'zone', label: 'Zone', sort: 'zone', badge: (r) => ({ text: ({ abidjan: 'Abidjan', interieur: 'Intérieur', exterieur: 'Extérieur' })[r.zone], cls: r.zone === 'abidjan' ? 'primary' : r.zone === 'interieur' ? 'warning' : 'success' }), format: () => '' },
+      { key: 'commune', label: 'Commune', sort: 'commune', format: (r) => r.commune || '—' },
+      { key: 'nom', label: 'Quartier / ville / pays', sort: 'nom', cls: 'strong' },
+      { key: 'prix', label: 'Prix', sort: 'prix', align: 'num', format: (r) => money(r.prix) },
+      { key: 'delai', label: 'Délai', format: (r) => r.delai || '—' },
+      { key: 'actif', label: 'État', badge: (r) => (Number(r.actif) ? null : { text: 'Désactivé', cls: '' }), format: () => '' },
+    ],
+    fields: [
+      { name: 'zone', label: 'Zone', type: 'select', required: true, default: () => 'abidjan', options: () => [{ value: 'abidjan', label: 'Abidjan (par commune et quartier)' }, { value: 'interieur', label: 'Intérieur du pays (par ville)' }, { value: 'exterieur', label: 'Extérieur (hors Côte d\'Ivoire)' }] },
+      { name: 'commune', label: 'Commune', type: 'text', showIf: (f) => f.zone === 'abidjan', editHint: 'Ex. Cocody, Yopougon, Marcory… regroupe les quartiers dans la caisse.' },
+      { name: 'nom', label: 'Quartier, ville ou pays', type: 'text', required: true, full: true },
+      { name: 'prix', label: 'Prix de la livraison', type: 'number', required: true, step: '1' },
+      { name: 'delai', label: 'Délai indicatif', type: 'text', editHint: 'Ex. Le jour même, 24 à 48 h, 3 à 5 jours.' },
+      { name: 'actif', label: 'Proposé à la prise de commande', type: 'select', default: () => 1, options: () => oui },
+    ],
+  },
+
   utilisateurs: {
     pk: 'id_user', deleteLabel: 'Désactiver', needsLookups: true,
     title: 'Utilisateurs', singular: 'utilisateur', subtitle: 'Comptes et rôles : caissier, magasinier, gérant',

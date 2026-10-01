@@ -1,20 +1,44 @@
 <script setup>
 // Écran de caisse : catalogue tactile, panier, paiements mixtes, ventes en attente, mouvements d'espèces, clôture et ticket.
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { api, auth, fileUrl, ApiError } from '../api'
+import { inject } from 'vue'
+import { api, auth, fileUrl, ApiError, estCaissier, prenomDe } from '../api'
 import { lookups, loadLookups } from '../lookups'
 import { money, qty, number, dateHeure } from '../format'
 import { toast } from '../toast'
+import { logoUrl, nomApp } from '../theme'
 import Icon from '../components/Icon.vue'
 import SearchSelect from '../components/SearchSelect.vue'
 import QuickCreate from '../components/QuickCreate.vue'
 import Ticket from '../components/Ticket.vue'
+import CommandeForm from '../components/CommandeForm.vue'
 import ZReport from '../components/ZReport.vue'
 
 const cat = ref({ produits: [], categories: [], modes: [] })
 const session = ref(undefined)         // undefined = chargement, null = aucune caisse ouverte
 const clients = ref([])
 const erreur = ref('')
+
+/* ---------- Commande / livraison depuis le panier ---------- */
+const commande = ref(false)
+function commandeCreee(c) {
+  commande.value = false
+  if (lignes.value.length) { vider(); toast(`Commande ${c.numero} enregistrée — suivez-la dans « Commandes »`) }
+}
+
+/* ---------- Terminal : horloge, menu, catégories illustrées ---------- */
+const deconnecter = inject('deconnecter', null)
+const kiosque = estCaissier()
+const heure = ref('')
+const majHeure = () => { heure.value = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) }
+majHeure()
+const horloge = setInterval(majHeure, 15000)
+onBeforeUnmount(() => clearInterval(horloge))
+const menu = ref(false)
+const nomCaisse = computed(() => lookups.caisses.find((c) => c.id === session.value?.idcaisse)?.nom || 'Caisse')
+// Vignette d'une catégorie : l'image de son premier produit illustré
+const vignette = (idcat) => cat.value.produits.find((p) => p.idcat === idcat && p.image)?.image
+const teinte = (c) => c.couleur || 'var(--primary)'
 
 /* ---------- Chargement ---------- */
 async function chargerCatalogue() {
@@ -216,13 +240,14 @@ async function reprendre(p) {
 async function supprimerAttente(p) { try { await api.del('paniers', p.idpanier); await chargerPaniers() } catch (e) { toast(e.message, 'error') } }
 
 /* ---------- Mouvements d'espèces ---------- */
-const mvt = reactive({ ouvert: false, type: 'sortie', montant: '', motif: '', busy: false, erreurs: {} })
-function ouvrirMvt(type) { Object.assign(mvt, { ouvert: true, type, montant: '', motif: '', erreurs: {} }) }
+const mvt = reactive({ ouvert: false, type: 'sortie', montant: '', motif: '', categorie: '', reference: '', busy: false, erreurs: {} })
+function ouvrirMvt(type) { Object.assign(mvt, { ouvert: true, type, montant: '', motif: '', categorie: '', reference: '', erreurs: {} }) }
+const categoriesMvt = computed(() => Object.entries(lookups.categories_mvt?.[mvt.type] || {}))
 async function enregistrerMvt() {
   mvt.busy = true; mvt.erreurs = {}
   try {
-    await api.post('operation-caisse', { type: mvt.type, montant: mvt.montant, motif: mvt.motif })
-    toast(mvt.type === 'sortie' ? 'Sortie de caisse enregistrée' : 'Entrée de caisse enregistrée'); mvt.ouvert = false
+    const res = await api.post('operation-caisse', { type: mvt.type, montant: mvt.montant, motif: mvt.motif, categorie: mvt.categorie, reference: mvt.reference })
+    toast(`${mvt.type === 'sortie' ? 'Sortie' : 'Entrée'} de caisse enregistrée — pièce ${res.operation.numero}`); mvt.ouvert = false
   } catch (e) {
     if (e instanceof ApiError && Object.keys(e.errors).length) mvt.erreurs = e.errors; else toast(e.message, 'error')
   } finally { mvt.busy = false }
@@ -261,12 +286,13 @@ function raccourcis(e) {
 </script>
 
 <template>
-  <main class="page pos-page">
+  <main class="page pos-page" :class="{ kiosque }">
     <div v-if="erreur" class="alert">{{ erreur }}</div>
     <div v-else-if="session === undefined" class="skeleton" style="height:420px" />
 
     <!-- ===== Caisse fermée : ouverture ===== -->
     <section v-else-if="session === null && !clo.final" class="card open-card reveal">
+      <button v-if="deconnecter" class="btn ghost sm out" @click="deconnecter"><Icon name="logout" :size="15" /> Se déconnecter</button>
       <span class="open-ico"><Icon name="lock" :size="30" /></span>
       <h1>Ouvrir la caisse</h1>
       <p class="muted">Comptez le fond de caisse présent dans le tiroir avant de commencer.</p>
@@ -283,83 +309,121 @@ function raccourcis(e) {
       <button class="btn primary lg" :disabled="ouverture.busy" @click="ouvrir"><Icon name="play" :size="18" /> {{ ouverture.busy ? 'Ouverture…' : 'Ouvrir la caisse' }}</button>
     </section>
 
-    <!-- ===== Caisse ouverte ===== -->
-    <div v-else-if="session" class="poscols">
-      <section class="pos-main">
-        <div class="pos-bar">
-          <div class="search">
-            <Icon name="search" :size="18" />
-            <input ref="recherche" v-model="q" class="input" type="search" placeholder="Produit, référence ou code-barres…  (F2)" aria-label="Rechercher un produit" autocomplete="off" autofocus @keydown.enter.prevent="entrerRecherche" />
-          </div>
-          <button class="btn" @click="panneauAttente = true"><Icon name="pause" :size="16" /> En attente<span v-if="paniers.length" class="badge primary">{{ paniers.length }}</span></button>
-          <button class="btn" title="Entrée d'espèces" @click="ouvrirMvt('entree')"><Icon name="plus" :size="16" /> Entrée</button>
-          <button class="btn" title="Sortie d'espèces" @click="ouvrirMvt('sortie')"><Icon name="minus" :size="16" /> Sortie</button>
-          <button class="btn danger" @click="ouvrirCloture"><Icon name="lock" :size="16" /> Clôturer</button>
+    <!-- ===== Caisse ouverte : terminal plein écran (panier à gauche, catalogue illustré à droite) ===== -->
+    <div v-else-if="session" class="terminal">
+      <aside class="cart" aria-label="Panier">
+        <div class="t-top">
+          <button class="t-ico" aria-label="Menu" @click="menu = true"><Icon name="menu" :size="22" /></button>
+          <span class="t-brand"><img v-if="logoUrl" :src="logoUrl" alt="" /><b>{{ nomApp }}</b></span>
+          <span class="t-clock">{{ heure }}</span>
+        </div>
+        <div class="order-bar">
+          <div class="who"><small>{{ nomCaisse }}</small><b>Vente en cours<template v-if="nbArticles"> · {{ qty(nbArticles) }} art.</template></b></div>
+          <button class="btn-dark" :disabled="!lignes.length" title="Mettre en attente (F8)" @click="mettreEnAttente">En attente</button>
+          <button class="btn-dark alt" :disabled="!lignes.length" @click="vider">Annuler</button>
         </div>
 
-        <div class="chips" role="tablist" aria-label="Catégories">
-          <button class="chip" :class="{ on: !catSel }" role="tab" @click="catSel = null">Tout</button>
-          <button v-for="c in cat.categories" :key="c.id" class="chip" :class="{ on: catSel === c.id }" role="tab" @click="catSel = catSel === c.id ? null : c.id">{{ c.nom }}</button>
+        <div class="client">
+          <Icon name="user" :size="20" />
+          <SearchSelect id="p-client" v-model="idclient" :options="optionsClients" placeholder="Ajouter un client" create-label="client" @create="(name) => (nouveauClient = name)" />
+          <button v-if="idclient" class="btn ghost icon sm" aria-label="Retirer le client" @click="idclient = ''"><Icon name="x" :size="15" /></button>
         </div>
-
-        <div v-if="!visibles.length" class="empty"><Icon name="inbox" :size="40" /><div>{{ cat.produits.length ? 'Aucun produit ne correspond.' : 'Le catalogue est vide. Ajoutez des produits pour commencer à vendre.' }}</div></div>
-        <div v-else class="grid-prod">
-          <button v-for="p in visibles" :key="p.id" class="prod" :class="{ out: stockEtat(p) === 'rupture' }" :disabled="stockEtat(p) === 'rupture' && !lookups.reglages.stock_negatif" @click="ajouter(p)">
-            <span class="thumb"><img v-if="p.image" :src="fileUrl('produits', p.image)" alt="" loading="lazy" /><Icon v-else :name="p.type === 'service' ? 'clipboard' : 'box'" :size="26" /></span>
-            <b>{{ p.nom }}</b>
-            <span class="price">{{ money(p.prix_vente) }}</span>
-            <span v-if="p.type === 'service'" class="stk svc">Service</span>
-            <span v-else-if="stockEtat(p) === 'rupture'" class="stk bad">Rupture</span>
-            <span v-else class="stk" :class="{ low: stockEtat(p) === 'bas' }">{{ qty(p.stock_qty) }} {{ p.unite }}</span>
-          </button>
-        </div>
-      </section>
-
-      <aside class="cart card" aria-label="Panier">
-        <header>
-          <h2><Icon name="cart" :size="20" /> Panier <small v-if="nbArticles">· {{ qty(nbArticles) }} article{{ nbArticles > 1 ? 's' : '' }}</small></h2>
-          <button v-if="lignes.length" class="btn ghost sm" @click="vider">Vider</button>
-        </header>
 
         <div class="lines">
-          <div v-if="!lignes.length" class="empty small"><Icon name="cart" :size="34" /><div>Touchez un produit pour l'ajouter</div></div>
-          <article v-for="l in lignes" :key="l.idprod" class="line">
-            <div class="top"><b>{{ l.nom }}</b><button class="btn ghost icon sm" :aria-label="`Retirer ${l.nom}`" @click="retirer(l)"><Icon name="x" :size="15" /></button></div>
-            <div class="bot">
-              <div class="stepper">
-                <button class="btn icon sm" :aria-label="`Moins de ${l.nom}`" @click="changerQte(l, l.quantite - 1)"><Icon name="minus" :size="14" /></button>
-                <input :value="l.quantite" class="input qty" type="number" min="0" :step="l.unite === 'pièce' ? 1 : 0.1" inputmode="decimal" :aria-label="`Quantité de ${l.nom}`" @change="changerQte(l, $event.target.value)" @focus="$event.target.select()" />
-                <button class="btn icon sm" :aria-label="`Plus de ${l.nom}`" @click="changerQte(l, l.quantite + 1)"><Icon name="plus" :size="14" /></button>
+          <div v-if="!lignes.length" class="empty small"><Icon name="cart" :size="38" /><div>Touchez un produit pour l'ajouter</div></div>
+          <TransitionGroup name="ligne">
+            <article v-for="l in lignes" :key="l.idprod" class="line">
+              <div class="head"><b>{{ l.nom }}</b><span class="lt">{{ money(l.prix * l.quantite) }}</span></div>
+              <div class="cells">
+                <div class="cell">
+                  <small>Qté</small>
+                  <div class="stepper">
+                    <button :aria-label="`Moins de ${l.nom}`" @click="changerQte(l, l.quantite - 1)"><Icon name="minus" :size="14" /></button>
+                    <input :value="l.quantite" type="number" min="0" :step="l.unite === 'pièce' ? 1 : 0.1" inputmode="decimal" :aria-label="`Quantité de ${l.nom}`" @change="changerQte(l, $event.target.value)" @focus="$event.target.select()" />
+                    <button :aria-label="`Plus de ${l.nom}`" @click="changerQte(l, l.quantite + 1)"><Icon name="plus" :size="14" /></button>
+                  </div>
+                </div>
+                <div class="cell">
+                  <small>Prix</small>
+                  <input v-if="prixLibre" v-model.number="l.prix" class="pu" type="number" min="0" :aria-label="`Prix de ${l.nom}`" @focus="$event.target.select()" />
+                  <b v-else>{{ money(l.prix) }}</b>
+                </div>
+                <button class="cell del" :aria-label="`Retirer ${l.nom}`" @click="retirer(l)"><Icon name="trash" :size="18" /></button>
               </div>
-              <span class="x">×</span>
-              <input v-if="prixLibre" v-model.number="l.prix" class="input pu" type="number" min="0" :aria-label="`Prix de ${l.nom}`" @focus="$event.target.select()" />
-              <span v-else class="pu-fixe">{{ money(l.prix) }}</span>
-              <b class="lt">{{ money(l.prix * l.quantite) }}</b>
-            </div>
-          </article>
+            </article>
+          </TransitionGroup>
         </div>
 
         <div class="cart-foot">
-          <div class="client">
-            <SearchSelect id="p-client" v-model="idclient" :options="optionsClients" placeholder="Client (facultatif)" create-label="client" @create="(name) => (nouveauClient = name)" />
-            <button v-if="idclient" class="btn ghost icon sm" aria-label="Retirer le client" @click="idclient = ''"><Icon name="x" :size="15" /></button>
-          </div>
           <div class="remise">
             <label for="p-rem">Remise</label>
             <input id="p-rem" v-model="remise.valeur" class="input" type="number" min="0" inputmode="decimal" placeholder="0" />
             <div class="seg"><button :class="{ on: remise.mode === 'montant' }" @click="remise.mode = 'montant'">FCFA</button><button :class="{ on: remise.mode === 'pct' }" @click="remise.mode = 'pct'">%</button></div>
           </div>
-          <div class="sum"><span>Sous-total</span><span>{{ money(brut) }}</span></div>
-          <div v-if="remiseMontant > 0" class="sum"><span>Remise</span><span>−{{ money(remiseMontant) }}</span></div>
-          <div v-if="tva > 0" class="sum sub"><span>dont TVA</span><span>{{ money(tva) }}</span></div>
-          <div class="sum total"><span>Total</span><b>{{ money(total) }}</b></div>
-          <div class="actions">
-            <button class="btn" :disabled="!lignes.length" title="Mettre en attente (F8)" @click="mettreEnAttente"><Icon name="pause" :size="16" /> Attente</button>
-            <button class="btn primary lg grow" :disabled="!lignes.length" title="Encaisser (F4)" @click="ouvrirPaiement"><Icon name="cash" :size="18" /> Encaisser {{ lignes.length ? money(total) : '' }}</button>
-          </div>
+          <div v-if="remiseMontant > 0" class="sum"><span>Sous-total {{ money(brut) }}</span><span>Remise −{{ money(remiseMontant) }}</span></div>
+          <div class="sum total"><span>Total <small v-if="tva > 0">dont TVA {{ money(tva) }}</small></span><b>{{ money(total) }}</b></div>
+        </div>
+        <button class="pay-btn" :disabled="!lignes.length" title="Encaisser (F4)" @click="ouvrirPaiement"><span>Encaisser</span><b>{{ money(total) }}</b></button>
+        <div class="t-actions">
+          <button @click="panneauAttente = true"><Icon name="pause" :size="24" /><span>En attente<i v-if="paniers.length" class="n">{{ paniers.length }}</i></span></button>
+          <button title="Prendre une commande ou une livraison" @click="commande = true"><Icon name="truck" :size="24" /><span>Commande</span></button>
+          <button @click="ouvrirMvt('entree')"><Icon name="plus" :size="24" /><span>Entrée</span></button>
+          <button @click="ouvrirMvt('sortie')"><Icon name="minus" :size="24" /><span>Sortie</span></button>
+          <button class="danger" @click="ouvrirCloture"><Icon name="lock" :size="24" /><span>Clôturer</span></button>
         </div>
       </aside>
+
+      <section class="catalogue">
+        <div class="t-top t-search">
+          <label class="search">
+            <Icon name="search" :size="20" />
+            <input ref="recherche" v-model="q" type="search" placeholder="Rechercher un article…  (F2)" aria-label="Rechercher un produit" autocomplete="off" autofocus @keydown.enter.prevent="entrerRecherche" />
+          </label>
+          <button class="t-ico scan" title="Scanner un code-barres (la douchette saisit dans la recherche)" aria-label="Scanner" @click="recherche?.focus()"><Icon name="barcode" :size="24" /></button>
+          <span class="t-user">{{ prenomDe(auth.user) }}</span>
+          <button class="t-ico" aria-label="Se déconnecter" title="Se déconnecter" @click="deconnecter ? deconnecter() : null"><Icon name="power" :size="20" /></button>
+        </div>
+
+        <div class="cats" role="tablist" aria-label="Catégories">
+          <button class="cat-tile" :class="{ on: !catSel }" role="tab" :aria-selected="!catSel" style="--c: var(--primary)" @click="catSel = null"><span>Tout</span></button>
+          <button v-for="c in cat.categories" :key="c.id" class="cat-tile" :class="{ on: catSel === c.id }" role="tab" :aria-selected="catSel === c.id" :style="{ '--c': teinte(c) }" @click="catSel = catSel === c.id ? null : c.id">
+            <img v-if="vignette(c.id)" :src="fileUrl('produits', vignette(c.id))" alt="" loading="lazy" />
+            <span>{{ c.nom }}</span>
+          </button>
+        </div>
+
+        <div class="zone-prod">
+          <div v-if="!visibles.length" class="empty"><Icon name="inbox" :size="40" /><div>{{ cat.produits.length ? 'Aucun produit ne correspond.' : 'Le catalogue est vide. Ajoutez des produits pour commencer à vendre.' }}</div></div>
+          <div v-else class="grid-prod">
+            <button v-for="p in visibles" :key="p.id" class="prod" :class="{ out: stockEtat(p) === 'rupture', photo: p.image }" :disabled="stockEtat(p) === 'rupture' && !lookups.reglages.stock_negatif" @click="ajouter(p)">
+              <img v-if="p.image" :src="fileUrl('produits', p.image)" alt="" loading="lazy" />
+              <Icon v-else class="ph" :name="p.type === 'service' ? 'clipboard' : 'box'" :size="34" />
+              <span class="price">{{ money(p.prix_vente) }}</span>
+              <span v-if="p.type === 'service'" class="stk svc">Service</span>
+              <span v-else-if="stockEtat(p) === 'rupture'" class="stk bad">Rupture</span>
+              <span v-else class="stk" :class="{ low: stockEtat(p) === 'bas' }">{{ qty(p.stock_qty) }} {{ p.unite }}</span>
+              <b class="nom">{{ p.nom }}</b>
+              <span v-if="lignes.find((l) => l.idprod === p.id)" class="in-cart">{{ qty(lignes.find((l) => l.idprod === p.id).quantite) }}</span>
+            </button>
+          </div>
+        </div>
+      </section>
     </div>
+
+    <!-- ===== Menu du terminal ===== -->
+    <Transition name="drawer">
+      <div v-if="menu" class="drawer-wrap" @click.self="menu = false" @keydown.esc="menu = false">
+        <nav class="drawer" aria-label="Menu de la caisse">
+          <div class="d-head"><b>{{ nomApp }}</b><span>{{ auth.user.name }}</span></div>
+          <RouterLink to="/ventes" @click="menu = false"><Icon name="receipt" :size="20" /> Ventes</RouterLink>
+          <RouterLink to="/commandes" @click="menu = false"><Icon name="truck" :size="20" /> Commandes et livraisons</RouterLink>
+          <RouterLink to="/mouvements" @click="menu = false"><Icon name="swap" :size="20" /> Mouvements de caisse</RouterLink>
+          <RouterLink to="/sessions" @click="menu = false"><Icon name="cash" :size="20" /> Sessions de caisse</RouterLink>
+          <RouterLink v-if="!kiosque" to="/" @click="menu = false"><Icon name="dashboard" :size="20" /> Quitter la caisse</RouterLink>
+          <button @click="menu = false; deconnecter && deconnecter()"><Icon name="logout" :size="20" /> Se déconnecter</button>
+        </nav>
+      </div>
+    </Transition>
 
     <!-- ===== Paiement ===== -->
     <div v-if="paiement.ouvert" class="overlay center" @click.self="!paiement.busy && (paiement.ouvert = false)">
@@ -433,7 +497,9 @@ function raccourcis(e) {
         <p class="muted">{{ mvt.type === 'sortie' ? 'Dépense payée avec le tiroir-caisse, retrait, dépôt en banque…' : 'Apport de monnaie, fonds ajoutés au tiroir…' }}</p>
         <div style="display:flex;flex-direction:column;gap:14px;margin-top:14px">
           <div class="field" :class="{ invalid: mvt.erreurs.montant }"><label for="m-mt">Montant</label><input id="m-mt" v-model="mvt.montant" class="input" type="number" min="1" inputmode="numeric" autofocus /><span v-if="mvt.erreurs.montant" class="error">{{ mvt.erreurs.montant }}</span></div>
-          <div class="field" :class="{ invalid: mvt.erreurs.motif }"><label for="m-mo">Motif <span class="req">*</span></label><input id="m-mo" v-model="mvt.motif" class="input" maxlength="200" placeholder="Ex. achat de sachets" /><span v-if="mvt.erreurs.motif" class="error">{{ mvt.erreurs.motif }}</span></div>
+          <div class="field" :class="{ invalid: mvt.erreurs.categorie }"><label for="m-cat">Catégorie <span class="req">*</span></label><select id="m-cat" v-model="mvt.categorie" class="input"><option value="" disabled>Choisir…</option><option v-for="[code, lib] in categoriesMvt" :key="code" :value="code">{{ lib }}</option></select><span v-if="mvt.erreurs.categorie" class="error">{{ mvt.erreurs.categorie }}</span></div>
+          <div class="field" :class="{ invalid: mvt.erreurs.motif }"><label for="m-mo">Libellé / motif <span class="req">*</span></label><input id="m-mo" v-model="mvt.motif" class="input" maxlength="200" placeholder="Ex. achat de sachets" /><span v-if="mvt.erreurs.motif" class="error">{{ mvt.erreurs.motif }}</span></div>
+          <div class="field"><label for="m-ref">N° de justificatif (facture, reçu…)</label><input id="m-ref" v-model="mvt.reference" class="input" maxlength="80" placeholder="Facultatif" /></div>
         </div>
         <div class="row"><button type="button" class="btn" @click="mvt.ouvert = false">Annuler</button><button class="btn primary" :disabled="mvt.busy">Enregistrer</button></div>
       </form>
@@ -467,6 +533,7 @@ function raccourcis(e) {
       </div>
     </div>
 
+    <CommandeForm v-if="commande" :lignes-init="lignes.map((l) => ({ idprod: l.idprod, nom: l.nom, unite: l.unite, quantite: l.quantite, prix: l.prix }))" :client-init="idclient" @close="commande = false" @created="commandeCreee" />
     <QuickCreate v-if="nouveauClient !== null" :spec="specClient" :name="nouveauClient" @close="nouveauClient = null" @created="clientCree" />
   </main>
 </template>
@@ -479,59 +546,108 @@ function raccourcis(e) {
 .btn.lg { padding: 14px 22px; font-size: 16px; border-radius: 16px; }
 .input.big { font-size: 22px; font-weight: 700; padding: 12px 14px; }
 
-.poscols { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 18px; align-items: start; }
-.pos-main { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
-.pos-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.pos-bar .search { position: relative; flex: 1; min-width: 220px; }
-.pos-bar .search svg { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--muted); }
-.pos-bar .search .input { padding-left: 42px; height: 46px; }
-.pos-bar .badge { margin-left: 6px; }
-.chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+/* ---- Terminal ---- */
+.terminal { display: grid; grid-template-columns: 392px minmax(0, 1fr); height: 100%; min-height: 0; background: var(--bg); }
+.pos-page { padding: 0; height: calc(100vh - 96px); }
+.pos-page.kiosque { position: fixed; inset: 0; height: auto; z-index: 20; background: var(--bg); }
+.pos-page > .open-card { position: relative; }
+.open-card .out { position: absolute; top: 12px; right: 12px; }
+.t-top { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 14px; background: var(--primary); color: var(--primary-text); flex: none; }
+.t-ico { width: 40px; height: 40px; border: 0; border-radius: 12px; display: grid; place-items: center; cursor: pointer; color: inherit; background: color-mix(in srgb, #000 16%, transparent); transition: transform .15s, background .15s; flex: none; }
+.t-ico:hover { background: color-mix(in srgb, #000 28%, transparent); } .t-ico:active { transform: scale(.94); }
+.t-top > .t-ico:first-child { background: transparent; }
+.t-brand { display: flex; align-items: center; gap: 8px; font-size: 19px; letter-spacing: -.02em; flex: 1; min-width: 0; }
+.t-brand img { height: 30px; border-radius: 8px; background: #fff; padding: 2px; }
+.t-clock { font-weight: 700; font-variant-numeric: tabular-nums; opacity: .95; }
+
+.cart { display: flex; flex-direction: column; min-height: 0; background: var(--surface-2); border-right: 1px solid var(--border); }
+.order-bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: #2b2540; color: #fff; flex: none; }
+.order-bar .who { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.order-bar small { opacity: .65; font-size: 12px; } .order-bar b { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btn-dark { border: 0; border-radius: 10px; padding: 10px 12px; font: inherit; font-weight: 600; font-size: 14px; color: #fff; background: rgba(255,255,255,.12); cursor: pointer; }
+.btn-dark.alt { background: rgba(255,255,255,.22); }
+.btn-dark:hover:not(:disabled) { background: rgba(255,255,255,.3); } .btn-dark:disabled { opacity: .4; cursor: not-allowed; }
+.client { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: var(--surface); border-bottom: 1px solid var(--border); color: var(--primary); flex: none; }
+.client > :nth-child(2) { flex: 1; min-width: 0; }
+
+.lines { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 90px; }
+.empty.small { padding: 34px 0; margin: auto; }
+.line { background: var(--surface); border-radius: 10px; border: 1px solid var(--border); overflow: hidden; }
+.line .head { display: flex; justify-content: space-between; gap: 8px; padding: 10px 12px; font-size: 15px; }
+.line .head b { line-height: 1.3; font-weight: 600; } .line .lt { font-weight: 800; white-space: nowrap; }
+.cells { display: grid; grid-template-columns: 1.5fr 1fr 56px; border-top: 1px solid var(--border); }
+.cell { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 8px 6px; border: 0; background: none; font: inherit; color: var(--primary); }
+.cell + .cell { border-left: 1px solid var(--border); }
+.cell small { color: var(--muted); font-size: 12px; } .cell b { font-weight: 700; font-size: 15px; }
+.cell.del { color: var(--danger); cursor: pointer; } .cell.del:hover { background: var(--danger-soft); }
+.stepper { display: flex; align-items: center; gap: 2px; }
+.stepper button { width: 30px; height: 30px; border-radius: 9px; border: 1px solid var(--border); background: var(--surface-2); color: var(--primary); display: grid; place-items: center; cursor: pointer; }
+.stepper button:active { transform: scale(.9); }
+.stepper input, .pu { width: 52px; text-align: center; border: 0; background: transparent; font: inherit; font-weight: 700; color: var(--primary); padding: 4px 0; border-bottom: 1px dashed var(--border); }
+.pu { width: 78px; }
+.ligne-enter-active { transition: all .25s var(--ease); } .ligne-leave-active { transition: all .18s ease; }
+.ligne-enter-from { opacity: 0; transform: translateX(-20px); } .ligne-leave-to { opacity: 0; transform: translateX(20px); }
+
+.cart-foot { padding: 10px 16px 6px; background: var(--surface); border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; flex: none; }
+.remise { display: flex; align-items: center; gap: 8px; }
+.remise label { font-size: 13px; color: var(--muted); }
+.remise .input { width: 84px; padding: 5px 10px; }
+.cart-foot .sum { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
+.cart-foot .sum.total { font-size: 18px; color: var(--text); align-items: baseline; }
+.cart-foot .sum.total small { font-size: 12px; color: var(--muted); margin-left: 6px; } .cart-foot .sum.total b { font-size: 20px; }
+.sum { display: flex; justify-content: space-between; }
 .chip { flex: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 8px 16px; border-radius: 999px; font: inherit; font-weight: 600; font-size: 14px; cursor: pointer; transition: all .15s; }
 .chip:hover { border-color: var(--primary); }
 .chip.on { background: var(--primary); border-color: var(--primary); color: #fff; }
+.pay-btn { display: flex; justify-content: space-between; align-items: center; border: 0; padding: 18px 20px; font: inherit; font-size: 22px; font-weight: 600; color: #fff; cursor: pointer; flex: none;
+  background: linear-gradient(180deg, var(--success), color-mix(in srgb, var(--success) 82%, #000)); transition: filter .15s, transform .1s; }
+.pay-btn b { font-size: 24px; } .pay-btn:hover:not(:disabled) { filter: brightness(1.08); } .pay-btn:active:not(:disabled) { transform: scale(.99); }
+.pay-btn:disabled { background: color-mix(in srgb, var(--success) 35%, var(--surface-2)); cursor: not-allowed; }
+.t-actions { display: grid; grid-template-columns: repeat(5, 1fr); background: var(--surface); border-top: 1px solid var(--border); flex: none; }
+.t-actions button { border: 0; background: none; padding: 10px 2px 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; font: inherit; font-size: 12.5px; color: var(--primary); cursor: pointer; position: relative; }
+.t-actions button + button { border-left: 1px solid var(--border); }
+.t-actions button:hover { background: var(--primary-soft); } .t-actions .danger { color: var(--danger); } .t-actions .danger:hover { background: var(--danger-soft); }
+.t-actions .n { font-style: normal; margin-left: 4px; background: var(--primary); color: #fff; border-radius: 99px; padding: 0 6px; font-size: 11px; font-weight: 700; }
 
-.grid-prod { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
-.prod { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; padding: 12px; border: 1px solid var(--border); background: var(--surface); border-radius: 18px; cursor: pointer; font: inherit; color: inherit; transition: transform .15s, box-shadow .15s, border-color .15s; }
-.prod:hover:not(:disabled) { transform: translateY(-3px); border-color: var(--primary); box-shadow: 0 12px 26px color-mix(in srgb, var(--primary) 18%, transparent); }
-.prod:active:not(:disabled) { transform: scale(.97); }
-.prod:disabled { opacity: .5; cursor: not-allowed; }
-.prod .thumb { width: 100%; aspect-ratio: 16 / 10; border-radius: 12px; background: var(--surface-2); display: grid; place-items: center; color: var(--muted); overflow: hidden; }
-.prod .thumb img { width: 100%; height: 100%; object-fit: cover; }
-.prod b { font-size: 14px; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.5em; }
-.prod .price { font-weight: 800; color: var(--primary); }
-.stk { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); font-weight: 600; }
-.stk.low { background: color-mix(in srgb, var(--warning) 18%, transparent); color: var(--warning); }
-.stk.bad { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
-.stk.svc { background: color-mix(in srgb, var(--primary) 14%, transparent); color: var(--primary); }
+.catalogue { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.t-search { background: color-mix(in srgb, var(--primary) 88%, #000); }
+.t-search .search { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.t-search .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; font-size: 16px; }
+.t-search .search input::placeholder { color: color-mix(in srgb, currentColor 65%, transparent); }
+.t-search .scan { width: 56px; }
+.t-user { font-weight: 600; white-space: nowrap; }
+.cats { display: flex; overflow-x: auto; flex: none; background: var(--surface-2); scrollbar-width: none; }
+.cat-tile { position: relative; flex: none; width: 104px; height: 92px; border: 0; padding: 0 6px 8px; display: flex; align-items: flex-end; justify-content: center; color: #fff; font: inherit; font-weight: 600; font-size: 14px; cursor: pointer; overflow: hidden;
+  background: linear-gradient(145deg, var(--c), color-mix(in srgb, var(--c) 55%, #000)); border-right: 1px solid rgba(255,255,255,.7); }
+.cat-tile img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: transform .4s var(--ease); }
+.cat-tile::before { content: ''; position: absolute; inset: 0; z-index: 1; background: linear-gradient(transparent 30%, rgba(0,0,0,.6)); }
+.cat-tile span { position: relative; z-index: 2; text-shadow: 0 1px 6px rgba(0,0,0,.5); }
+.cat-tile:hover img { transform: scale(1.08); }
+.cat-tile:not(.on) { filter: saturate(.75) brightness(.92); }
+.cat-tile.on::after { content: ''; position: absolute; left: 50%; bottom: 0; z-index: 3; transform: translateX(-50%); border: 8px solid transparent; border-bottom-color: var(--bg); }
+.zone-prod { flex: 1; overflow-y: auto; padding: 18px; }
+.grid-prod { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+.prod { position: relative; aspect-ratio: 1.12; border: 1px solid var(--border); border-radius: 10px; padding: 0; overflow: hidden; cursor: pointer; font: inherit; color: #fff;
+  display: flex; align-items: center; justify-content: center; background: linear-gradient(145deg, color-mix(in srgb, var(--primary) 70%, #fff), var(--primary)); transition: transform .15s var(--ease), box-shadow .15s; }
+.prod img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.prod .ph { opacity: .55; }
+.prod::before { content: ''; position: absolute; inset: 0; z-index: 1; background: linear-gradient(rgba(0,0,0,.22), rgba(0,0,0,.05) 40%, rgba(0,0,0,.5)); }
+.prod .nom { position: relative; z-index: 2; margin-top: auto; align-self: stretch; padding: 8px 8px 10px; text-align: center; font-size: 15px; font-weight: 600; line-height: 1.2; text-shadow: 0 1px 6px rgba(0,0,0,.6); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.prod:hover:not(:disabled) { transform: translateY(-3px); box-shadow: 0 14px 28px color-mix(in srgb, var(--primary) 28%, transparent); }
+.prod:active:not(:disabled) { transform: scale(.96); }
+.prod:disabled { opacity: .5; cursor: not-allowed; filter: grayscale(.6); }
+.prod .price { position: absolute; z-index: 2; top: 8px; left: 8px; background: rgba(0,0,0,.55); backdrop-filter: blur(4px); padding: 3px 9px; border-radius: 99px; font-size: 13px; font-weight: 800; }
+.stk { position: absolute; z-index: 2; top: 8px; right: 8px; font-size: 11px; padding: 3px 8px; border-radius: 99px; background: rgba(43,158,107,.9); color: #fff; font-weight: 600; }
+.stk.low { background: rgba(232,137,12,.92); } .stk.bad { background: rgba(230,73,128,.92); } .stk.svc { background: rgba(112,72,232,.9); }
+.in-cart { position: absolute; z-index: 3; left: 50%; top: 42%; transform: translate(-50%, -50%); min-width: 38px; height: 38px; border-radius: 99px; background: var(--success); color: #fff; font-weight: 800; display: grid; place-items: center; padding: 0 10px; box-shadow: 0 6px 16px rgba(0,0,0,.3); animation: pop .25s var(--ease); }
 
-.cart { position: sticky; top: 12px; display: flex; flex-direction: column; max-height: calc(100vh - 100px); padding: 0; overflow: hidden; }
-.cart header { display: flex; justify-content: space-between; align-items: center; padding: 16px 18px 8px; }
-.cart header h2 { display: flex; align-items: center; gap: 8px; font-size: 18px; margin: 0; }
-.cart header small { font-weight: 500; color: var(--muted); }
-.lines { flex: 1; overflow-y: auto; padding: 4px 14px; min-height: 120px; }
-.empty.small { padding: 26px 0; }
-.line { padding: 10px 0; border-bottom: 1px dashed var(--border); animation: pop .2s var(--ease); }
-.line .top { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
-.line .top b { font-size: 14px; line-height: 1.3; }
-.line .bot { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
-.stepper { display: flex; align-items: center; gap: 4px; }
-.input.qty { width: 62px; text-align: center; padding: 6px; font-weight: 700; }
-.input.pu { width: 92px; padding: 6px 8px; }
-.pu-fixe { color: var(--muted); font-size: 13px; }
-.x { color: var(--muted); }
-.lt { margin-left: auto; }
-.cart-foot { padding: 12px 18px 18px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; background: color-mix(in srgb, var(--surface-2) 60%, var(--surface)); }
-.client { display: flex; gap: 4px; align-items: center; }
-.client > :first-child { flex: 1; }
-.remise { display: flex; align-items: center; gap: 8px; }
-.remise label { font-size: 13px; color: var(--muted); }
-.remise .input { width: 90px; padding: 6px 10px; }
-.sum { display: flex; justify-content: space-between; }
-.sum.sub { color: var(--muted); font-size: 13px; }
-.sum.total { font-size: 22px; font-weight: 800; margin-top: 2px; }
-.actions { display: flex; gap: 8px; margin-top: 4px; }
-.actions .grow { flex: 1; justify-content: center; white-space: nowrap; padding-inline: 12px; }
+.drawer-wrap { position: fixed; inset: 0; z-index: 60; background: rgba(20, 12, 40, .5); }
+.drawer { width: min(300px, 86vw); height: 100%; background: var(--surface); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; padding: 0 0 12px; }
+.d-head { background: var(--primary); color: var(--primary-text); padding: 22px 20px; display: flex; flex-direction: column; gap: 2px; font-size: 20px; } .d-head span { font-size: 13px; opacity: .85; }
+.drawer a, .drawer button { display: flex; align-items: center; gap: 12px; padding: 15px 20px; border: 0; background: none; font: inherit; font-size: 16px; color: var(--text); text-decoration: none; cursor: pointer; text-align: left; }
+.drawer a:hover, .drawer button:hover { background: var(--primary-soft); } .drawer button:last-child { margin-top: auto; color: var(--danger); }
+.drawer-enter-active, .drawer-leave-active { transition: background .25s; } .drawer-enter-active .drawer, .drawer-leave-active .drawer { transition: transform .3s var(--ease); }
+.drawer-enter-from, .drawer-leave-to { background: transparent; } .drawer-enter-from .drawer, .drawer-leave-to .drawer { transform: translateX(-100%); }
 
 .modal.pay { width: min(520px, calc(100% - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; }
 .due { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 16px; border-radius: 16px; background: var(--surface-2); margin: 8px 0 14px; }
@@ -560,8 +676,12 @@ function raccourcis(e) {
 .ecart.ok { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); }
 .ecart.ko { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
 
-@media (max-width: 980px) {
-  .poscols { grid-template-columns: 1fr; }
-  .cart { position: static; max-height: none; }
+@media (max-width: 860px) {
+  .pos-page, .pos-page.kiosque { height: auto; position: static; }
+  .pos-page.kiosque { position: fixed; inset: 0; overflow-y: auto; }
+  .terminal { grid-template-columns: 1fr; height: auto; }
+  .catalogue { order: -1; } .cart { border-right: 0; } .lines { max-height: 40vh; }
+  .zone-prod { overflow: visible; }
 }
+@media (prefers-reduced-motion: reduce) { .prod, .cat-tile img, .ligne-enter-active, .ligne-leave-active { transition: none; } .in-cart { animation: none; } }
 </style>
