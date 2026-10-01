@@ -32,10 +32,14 @@ const apercuTicket = computed(() => ({
   },
 }))
 
+// Ne remet à zéro que les formulaires demandés : la saisie en cours dans les autres cartes est conservée
+function remplir(sections = Object.keys(f)) {
+  for (const k of sections) f[k] = JSON.parse(JSON.stringify(cfg.value[k]))
+  if (sections.includes('mail')) f.mail.actif = cfg.value.mail.actif === '1'
+}
 async function charger() {
   cfg.value = await api.get('config')
-  for (const k of Object.keys(f)) f[k] = JSON.parse(JSON.stringify(cfg.value[k]))
-  f.mail.actif = cfg.value.mail.actif === '1'
+  remplir()
 }
 onMounted(charger)
 onBeforeUnmount(() => { apercu.palette = ''; apercu.mode = '' })   // l'aperçu non enregistré est abandonné en quittant la page
@@ -43,8 +47,8 @@ onBeforeUnmount(() => { apercu.palette = ''; apercu.mode = '' })   // l'aperçu 
 async function enregistrer(section, valeurs, message = 'Enregistré') {
   busy.value = section; erreurs.value = {}
   try {
-    cfg.value = await api.post('config', { section, values: valeurs })
-    await charger(); await chargerConfigPublique()
+    cfg.value = await api.post('config', { section, values: valeurs })   // la réponse contient la configuration complète à jour
+    remplir([section]); await chargerConfigPublique()
     toast(message)
     return true
   } catch (e) {
@@ -58,8 +62,7 @@ async function enregistrer(section, valeurs, message = 'Enregistré') {
 /* ---- Entreprise ---- */
 const piedParDefaut = computed(() => { const e = f.entreprise; return [[e.nom, e.forme].filter(Boolean).join(' '), e.rccm && `RCCM ${e.rccm}`, e.nif && `NIF ${e.nif}`].filter(Boolean).join(' · ') || 'Mentions légales…' })
 async function saveEntreprise() {
-  const copyright = JSON.parse(JSON.stringify(f.copyright))   // enregistrer() recharge les formulaires : on met la saisie de côté
-  if (await enregistrer('entreprise', f.entreprise, "Informations de l'entreprise enregistrées")) await enregistrer('copyright', copyright, 'Copyright enregistré')
+  if (await enregistrer('entreprise', f.entreprise, "Informations de l'entreprise enregistrées")) await enregistrer('copyright', f.copyright, 'Copyright enregistré')
 }
 async function envoyerLogo(file) {
   logoFile.value = file
@@ -67,8 +70,9 @@ async function envoyerLogo(file) {
   busy.value = 'logo'
   try {
     const fd = new FormData(); fd.append('logo', file)
-    await request('POST', 'config-logo', { body: fd })
-    appConfig.logoVersion++; await charger(); await chargerConfigPublique(); toast('Logo mis à jour')
+    cfg.value = await request('POST', 'config-logo', { body: fd })
+    f.entreprise.logo = cfg.value.entreprise.logo   // le reste de la saisie de l'entreprise n'est pas touché
+    appConfig.logoVersion++; await chargerConfigPublique(); toast('Logo mis à jour')
   } catch (e) { toast(e.errors?.logo || e.message, 'error') } finally { busy.value = ''; logoFile.value = null }
 }
 async function retirerLogo() { if (await enregistrer('entreprise', { ...f.entreprise, logo: '' }, 'Logo retiré')) appConfig.logoVersion++ }
@@ -99,16 +103,15 @@ const transports = [{ value: 'mail', label: 'Fonction mail() du serveur (héberg
 const securites = [{ value: 'tls', label: 'STARTTLS (port 587)' }, { value: 'ssl', label: 'SSL/TLS (port 465)' }, { value: 'none', label: 'Aucune (déconseillé)' }]
 const frequences = [{ value: 'quotidien', label: 'Tous les jours' }, { value: 'hebdomadaire', label: 'Chaque lundi' }]
 async function saveMail() {
-  const alertes = JSON.parse(JSON.stringify(f.alertes))
   const ok = await enregistrer('mail', { ...f.mail, smtp_pass: nouveauPass.value }, 'Paramètres e-mail enregistrés')
-  if (ok) { nouveauPass.value = ''; await enregistrer('alertes', alertes, 'Alertes enregistrées') }
+  if (ok) { nouveauPass.value = ''; await enregistrer('alertes', f.alertes, 'Alertes enregistrées') }
 }
 async function actionMail(route, libelle) {
   busy.value = route
   try {
     const r = await request('POST', route)
     toast(r.envoye === false ? r.message : `${libelle} : envoyé à ${r.destinataires?.join(', ') || 'vos destinataires'}`)
-  } catch (e) { toast(e.message, 'error') } finally { busy.value = ''; charger() }
+  } catch (e) { toast(e.message, 'error') } finally { busy.value = ''; cfg.value = await api.get('config') }   // journal d'envoi à jour, formulaires intacts
 }
 const dateHeure = (d) => new Date(d.replace(' ', 'T') + 'Z').toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 const statutMail = { envoye: ['success', 'Envoyé'], echec: ['danger', 'Échec'], rien: ['', 'Rien à signaler'] }

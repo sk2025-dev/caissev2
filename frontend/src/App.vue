@@ -83,7 +83,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', closePop))
 
 async function doLogout() {
   const debut = Date.now()
-  showSplash('aurevoir', prenomDe(auth.user))   // « À bientôt » recouvre l'écran pendant la fermeture de la session
+  showSplash('aurevoir', prenomDe(auth.user), auth.user.photo ? fileUrl('utilisateurs', auth.user.photo) : '')   // « À bientôt » recouvre l'écran pendant la fermeture de la session
   popup.value = ''; menuOpen.value = false
   await logout()
   await pause(1800 - (Date.now() - debut))

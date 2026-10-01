@@ -1,5 +1,5 @@
 <script setup>
-// Écrans « Bienvenue » et « À bientôt » : dégradé aux couleurs de la palette, logo au centre d'un anneau de progression,
+// Écrans « Bienvenue » et « À bientôt » : dégradé aux couleurs de la palette, photo de l'utilisateur (sinon logo) au centre d'un anneau de progression,
 // articles de boutique en orbite, prénom animé lettre par lettre et liste d'étapes cochées (façon ticket de caisse).
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { splash, DUREES } from '../splash'
@@ -35,8 +35,9 @@ const fini = computed(() => etape.value === phrases.value.length - 1)
         <div class="stage">
           <svg class="ring" viewBox="0 0 160 160" aria-hidden="true"><circle class="track" cx="80" cy="80" r="72" /><circle class="prog" cx="80" cy="80" r="72" pathLength="100" /></svg>
           <div class="orbit" aria-hidden="true"><span v-for="[ic, a] in orbite" :key="ic" class="o" :style="{ '--a': a + 'deg' }"><span class="u" :style="{ '--a': a + 'deg' }"><i><Icon :name="ic" :size="18" /></i></span></span></div>
-          <div class="emblem">
-            <img v-if="logoUrl" :src="logoUrl" alt="" />
+          <div class="emblem" :class="{ photo: splash.photo }">
+            <img v-if="splash.photo" :src="splash.photo" alt="" @error="splash.photo = ''" />
+            <img v-else-if="logoUrl" :src="logoUrl" alt="" />
             <Icon v-else-if="splash.mode === 'aurevoir' && fini" name="check" :size="42" />
             <Icon v-else name="cart" :size="42" />
           </div>

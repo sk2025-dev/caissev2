@@ -60,7 +60,7 @@ export const prenomDe = (u) => (u?.prenom || (u?.name || '').split(' ')[0] || ''
 
 export async function login(email, password) {
   const { user } = await request('POST', 'auth/login', { body: { email, password }, silent401: true })
-  showSplash('bienvenue', prenomDe(user))   // l'écran d'accueil couvre la page AVANT que le tableau de bord ne s'affiche
+  showSplash('bienvenue', prenomDe(user), user.photo ? fileUrl('utilisateurs', user.photo) : '')   // l'écran d'accueil couvre la page AVANT que le tableau de bord ne s'affiche
   auth.user = user
   auth.notice = ''
 }
