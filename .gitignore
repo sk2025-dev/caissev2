@@ -1,0 +1,12 @@
+.env
+.DS_Store
+.idea/
+*.log
+*.tmp
+*.bak
+frontend/node_modules/
+exports/*
+!exports/.htaccess
+doc/logo/*
+doc/produits/*
+!doc/*/.gitkeep

@@ -1,0 +1,10 @@
+Options -Indexes
+# Fichiers sensibles
+<FilesMatch "^(\.env.*|error_log|.*\.(sql|gz|psd|md|log|bak))$">
+    Require all denied
+</FilesMatch>
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "same-origin"
+</IfModule>

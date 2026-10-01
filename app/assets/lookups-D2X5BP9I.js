@@ -1,0 +1,1 @@
+import{z as a,p as o}from"./index-CJky-x7U.js";const s=o({loaded:!1,categories:[],fournisseurs:[],modes:[],caisses:[],caissiers:[],groupes:[],reglages:{tva_defaut:0,prix_libre:!1,remise_max:10,stock_negatif:!1}});async function r(e=!1){s.loaded&&!e||Object.assign(s,await a.get("lookups"),{loaded:!0})}export{r as a,s as l};
