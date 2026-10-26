@@ -137,6 +137,7 @@ switch ($r) {
             'sources_depense' => role_peut($user['role'], 'depenses.gerer') ? mouvements_sources() : [],
             'zones_livraison' => role_peut($user['role'], 'commandes.lire') ? $t('SELECT idzone AS id, zone, commune, nom, prix, delai FROM zones_livraison WHERE supp = 0 AND actif = 1 ORDER BY zone, commune, nom') : [],
             'caisses' => $t('SELECT idcaisse AS id, nom FROM caisses WHERE supp = 0 AND actif = 1 ORDER BY idcaisse'),
+            'caisse_fixe' => ($fixe = caisse_fixe($bdd, $user['id'])) ? ['id' => (int)$fixe['idcaisse'], 'nom' => $fixe['nom'], 'actif' => (int)$fixe['actif'] === 1] : null,
             'produits' => role_peut($user['role'], 'catalogue.ecrire') ? $t('SELECT idprod AS id, nom FROM produits WHERE supp = 0 ORDER BY nom') : [],   // choix du produit d'un avis
             'caissiers' => role_peut($user['role'], 'ventes.lire_toutes') ? $t("SELECT id_user AS id, CONCAT(nomag, ' ', prenom) AS nom FROM users WHERE user_status = 1 ORDER BY nomag") : [],
             'groupes' => is_admin_role($user['role']) ? $t('SELECT idgpe AS id, coden AS nom FROM table_gpe_users' . (is_super_role($user['role']) ? '' : " WHERE coden <> 'superadmin'") . ' ORDER BY coden') : [],

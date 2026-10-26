@@ -68,15 +68,18 @@ onBeforeUnmount(() => document.removeEventListener('keydown', raccourcis))
 /* ---------- Ouverture de caisse ---------- */
 const ouverture = reactive({ idcaisse: '', fond: '0', busy: false, erreurs: {}, occupees: [], motif: '' })
 // Caisses occupées par une session ouverte : affichées dans la liste, une caisse libre est proposée par défaut
+// Utilisateur affecté à une seule caisse (Utilisateurs → « Caisse autorisée ») : pas de choix possible
+const fixe = computed(() => lookups.caisse_fixe || null)
 async function chargerOccupation() {
   try { ouverture.occupees = (await api.get('caisses-occupation')).occupees } catch { ouverture.occupees = [] }
+  if (fixe.value) { ouverture.idcaisse = fixe.value.id; return }
   const libre = lookups.caisses.find((c) => !occupation(c.id))
   if (libre && (!ouverture.idcaisse || occupation(ouverture.idcaisse))) ouverture.idcaisse = libre.id
 }
 const occupation = (idcaisse) => ouverture.occupees.find((o) => String(o.idcaisse) === String(idcaisse))
 const occupee = computed(() => occupation(ouverture.idcaisse))
-const optionsCaisses = computed(() => lookups.caisses.map((c) => { const o = occupation(c.id); return { value: c.id, label: o ? `${c.nom} — ouverte par ${o.caissier}` : c.nom, short: c.nom } }))
-watch(() => lookups.caisses, (c) => { if (!ouverture.idcaisse && c.length) ouverture.idcaisse = c[0].id; if (c.length) chargerOccupation() }, { immediate: true })
+const optionsCaisses = computed(() => lookups.caisses.filter((c) => !fixe.value || c.id === fixe.value.id).map((c) => { const o = occupation(c.id); return { value: c.id, label: o ? `${c.nom} — ouverte par ${o.caissier}` : c.nom, short: c.nom } }))
+watch(() => lookups.caisses, (c) => { if (!ouverture.idcaisse && c.length) ouverture.idcaisse = fixe.value?.id ?? c[0].id; if (c.length) chargerOccupation() }, { immediate: true })
 watch(() => occupee.value?.idsession, () => { ouverture.motif = occupee.value ? `Reprise de la caisse par ${auth.user?.name || 'le gérant'}` : '' })
 async function ouvrir() {
   ouverture.busy = true; ouverture.erreurs = {}
@@ -347,10 +350,12 @@ function raccourcis(e) {
       <span class="open-ico"><Icon name="lock" :size="30" /></span>
       <h1>Ouvrir la caisse</h1>
       <p class="muted">Comptez le fond de caisse présent dans le tiroir avant de commencer.</p>
-      <div class="field" :class="{ invalid: ouverture.erreurs.idcaisse }">
+      <div class="field" :class="{ invalid: ouverture.erreurs.idcaisse || (fixe && !fixe.actif) }">
         <label for="o-c">Caisse</label>
-        <SearchSelect id="o-c" v-model="ouverture.idcaisse" :options="optionsCaisses" />
-        <span v-if="ouverture.erreurs.idcaisse" class="error">{{ ouverture.erreurs.idcaisse }}</span>
+        <div v-if="fixe" id="o-c" class="caisse-fixe"><Icon name="lock" :size="16" /><b>{{ fixe.nom }}</b><span class="muted">Votre caisse attitrée</span></div>
+        <SearchSelect v-else id="o-c" v-model="ouverture.idcaisse" :options="optionsCaisses" />
+        <span v-if="fixe && !fixe.actif" class="error">Votre caisse est désactivée : demandez au gérant de la réactiver ou de vous affecter à une autre caisse.</span>
+        <span v-else-if="ouverture.erreurs.idcaisse" class="error">{{ ouverture.erreurs.idcaisse }}</span>
       </div>
       <div v-if="occupee" class="occupee" role="alert">
         <p><Icon name="alert" :size="16" /> <span>Cette caisse est déjà ouverte par <b>{{ occupee.caissier }}</b> depuis le {{ dateHeure(occupee.ouverture_at) }}.</span></p>
@@ -367,7 +372,7 @@ function raccourcis(e) {
         <input id="o-f" v-model="ouverture.fond" class="input big" type="number" min="0" step="1" inputmode="numeric" @keydown.enter="ouvrir" />
         <span v-if="ouverture.erreurs.fond_initial" class="error">{{ ouverture.erreurs.fond_initial }}</span>
       </div>
-      <button v-if="!occupee" class="btn primary lg" :disabled="ouverture.busy" @click="ouvrir"><Icon name="play" :size="18" /> {{ ouverture.busy ? 'Ouverture…' : 'Ouvrir la caisse' }}</button>
+      <button v-if="!occupee" class="btn primary lg" :disabled="ouverture.busy || (fixe && !fixe.actif)" @click="ouvrir"><Icon name="play" :size="18" /> {{ ouverture.busy ? 'Ouverture…' : 'Ouvrir la caisse' }}</button>
     </section>
 
     <!-- ===== Caisse ouverte : terminal plein écran (panier à gauche, catalogue illustré à droite) ===== -->
@@ -750,4 +755,6 @@ function raccourcis(e) {
   .zone-prod { overflow: visible; }
 }
 @media (prefers-reduced-motion: reduce) { .prod, .cat-tile img, .ligne-enter-active, .ligne-leave-active { transition: none; } .in-cart { animation: none; } }
+.caisse-fixe { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface-2); }
+.caisse-fixe .muted { margin-left: auto; font-size: 13px; }
 </style>

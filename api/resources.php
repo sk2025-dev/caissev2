@@ -215,8 +215,8 @@ return [
         'roles' => ['admin', 'superadmin'], 'roles_ecriture' => ['admin', 'superadmin'],
         'scope' => function ($user) { return is_super_role($user['role']) ? '1=1' : "(g.coden IS NULL OR g.coden <> 'superadmin')"; },
         'table' => 'users', 'pk' => 'id_user', 'pk_col' => 'u.id_user',
-        'select' => 'u.id_user, u.nomag, u.prenom, u.emailag, u.telag, u.gpe, u.user_status, u.photo_user, u.dateenr, g.coden AS groupe',
-        'from' => 'users u LEFT JOIN table_gpe_users g ON g.idgpe = u.gpe',
+        'select' => 'u.id_user, u.nomag, u.prenom, u.emailag, u.telag, u.gpe, u.user_status, u.photo_user, u.dateenr, u.idcaisse_fixe, k.nom AS caisse_fixe, g.coden AS groupe',
+        'from' => 'users u LEFT JOIN table_gpe_users g ON g.idgpe = u.gpe LEFT JOIN caisses k ON k.idcaisse = u.idcaisse_fixe',
         'where' => '1=1',
         'search' => ['u.nomag', 'u.prenom', 'u.emailag'],
         'sort' => ['nomag' => 'u.nomag', 'emailag' => 'u.emailag', 'groupe' => 'g.coden'],
@@ -231,6 +231,7 @@ return [
             'gpe' => ['type' => 'ref', 'required' => true, 'table' => 'table_gpe_users', 'pk' => 'idgpe'],
             'user_status' => ['type' => 'enum', 'values' => [0, 1]],
             'photo_user' => ['type' => 'file', 'dir' => 'utilisateurs', 'allow' => ['jpg', 'jpeg', 'png', 'webp']],
+            'idcaisse_fixe' => ['type' => 'ref', 'table' => 'caisses', 'pk' => 'idcaisse', 'where' => 'supp = 0 AND actif = 1'],   // vide = toutes les caisses
         ],
         'before_save' => function (PDO $db, array $d, $existing, $user) {
             // Seul un super administrateur peut attribuer ce rôle

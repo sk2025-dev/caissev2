@@ -204,6 +204,7 @@ export const resources = {
       { key: 'nomag', label: 'Nom', sort: 'nomag', cls: 'strong', format: (r) => [r.nomag, r.prenom].filter(Boolean).join(' ') },
       { key: 'emailag', label: 'E-mail', sort: 'emailag' },
       { key: 'groupe', label: 'Rôle', sort: 'groupe', badge: (r) => ({ text: ({ admin: 'Gérant', caissier: 'Caissier', magasinier: 'Magasinier', superadmin: 'Super administrateur' })[r.groupe] || r.groupe || '—', cls: 'primary' }) },
+      { key: 'caisse_fixe', label: 'Caisses', badge: (r) => (r.caisse_fixe ? { text: r.caisse_fixe, cls: 'warning' } : { text: 'Toutes', cls: '' }) },
       { key: 'user_status', label: 'Compte', badge: (r) => (Number(r.user_status) ? { text: 'Actif', cls: 'success' } : { text: 'Désactivé', cls: 'danger' }) },
     ],
     fields: [
@@ -214,6 +215,9 @@ export const resources = {
       { name: 'gpe', label: 'Rôle', type: 'select', required: true, options: (l) => l.groupes.map((g) => ({ value: g.id, label: ({ admin: 'Gérant', caissier: 'Caissier', magasinier: 'Magasinier', superadmin: 'Super administrateur' })[g.nom] || g.nom })) },
       { name: 'pass', label: 'Mot de passe', type: 'password', requiredOnCreate: true, editHint: 'Laissez vide pour conserver le mot de passe actuel.' },
       { name: 'user_status', label: 'Compte actif', type: 'select', default: () => 1, options: () => oui },
+      { name: 'idcaisse_fixe', label: 'Caisse autorisée', type: 'select', default: () => '', full: true,
+        options: (l) => [{ value: '', label: 'Toutes les caisses (il choisit à l\'ouverture)' }, ...l.caisses.map((c) => ({ value: c.id, label: `Uniquement « ${c.nom} »` }))],
+        hint: () => 'Une caisse imposée : l\'utilisateur ne peut ouvrir que celle-ci, sans pouvoir changer de caisse.' },
       { name: 'photo_user', label: 'Photo (carte virtuelle)', type: 'file', dir: 'utilisateurs', accept: '.jpg,.jpeg,.png,.webp', full: true },
     ],
   },

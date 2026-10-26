@@ -721,6 +721,16 @@ list($c, $j) = $a->call('POST', 'vente-creer', [], ['lignes' => [['idprod' => $r
 list(, $j) = $a->call('GET', 'vente', ['id' => $vA['idvente']]); check('les autres caisses gardent la numérotation et le ticket communs', strpos($j['vente']['numero'], 'V-') === 0 && $j['vente']['ticket']['entreprise']['nom'] !== 'Boutique Boissons');
 $a->call('POST', 'session-cloturer', [], ['compte_especes' => 0, 'notes' => 'Fin du test des caisses']);
 check('paramétrage journalisé', (bool)$pdo->query("SELECT COUNT(*) FROM audit_log WHERE entity = 'caisses' AND entity_id = " . (int)$cxB . " AND resume LIKE '%paramétrée%'")->fetchColumn());
+$gCaissier = (int)$pdo->query("SELECT idgpe FROM table_gpe_users WHERE coden = 'caissier'")->fetchColumn();
+list($c, $j) = $a->call('POST', 'utilisateurs', [], ['nomag' => 'Caissier Boissons', 'emailag' => 'fixe@test.local', 'pass' => 'secret123', 'gpe' => $gCaissier, 'idcaisse_fixe' => $cxB]);
+check('utilisateur affecté à une seule caisse', $c === 201 && (int)$j['data']['idcaisse_fixe'] === (int)$cxB && $j['data']['caisse_fixe'] === 'Caisse Boissons', json_encode($j));
+$kf = new Client(); $kf->login('fixe@test.local');
+list(, $j) = $kf->call('GET', 'lookups'); check('la caisse imposée est connue de l\'écran de caisse', ($j['caisse_fixe']['id'] ?? 0) === (int)$cxB);
+list($c, $j) = $kf->call('POST', 'session-ouvrir', [], ['idcaisse' => 1, 'fond_initial' => 0]); check('ouverture d\'une autre caisse refusée', $c === 403 && $j['code'] === 'caisse_imposee', json_encode($j));
+list($c, $j) = $kf->call('POST', 'session-ouvrir', [], ['fond_initial' => 0]); check('ouverture : sa caisse est choisie d\'office', $c === 201 && (int)$j['session']['idcaisse'] === (int)$cxB, json_encode($j));
+$kf->call('POST', 'session-cloturer', [], ['compte_especes' => 0]);
+list($c, $j) = $a->call('POST', 'utilisateurs', ['id' => $j['session']['iduser'] ?? 0], ['idcaisse_fixe' => '']); check('affectation retirée : toutes les caisses', $c === 200 && $j['data']['idcaisse_fixe'] === null);
+list($c, $j) = $a->call('POST', 'utilisateurs', [], ['nomag' => 'X', 'emailag' => 'x2@test.local', 'pass' => 'secret123', 'gpe' => $gCaissier, 'idcaisse_fixe' => 99999]); check('caisse inexistante refusée', $c === 422 && isset($j['errors']['idcaisse_fixe']));
 
 echo "Journal d'activité (traçabilité)\n";
 $e = $jr("action = 'connexion_echec' AND acteur = 'admin@test.local'"); check('échec de connexion journalisé (compte visé, e-mail saisi, IP)', $e && (int)$e['entity_id'] > 0 && $e['user_id'] === null && $e['ip'] !== '', json_encode($e));

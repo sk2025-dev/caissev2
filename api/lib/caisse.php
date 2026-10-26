@@ -1,6 +1,16 @@
 <?php
 /** Sessions de caisse : ouverture avec fond de caisse, mouvements d'espèces, clôture avec comptage et écart. */
 
+/** Caisse imposée à l'utilisateur (idcaisse, nom, actif) ou null s'il peut ouvrir toutes les caisses. */
+function caisse_fixe(PDO $db, $userId)
+{
+    try {
+        $st = $db->prepare('SELECT k.idcaisse, k.nom, k.actif FROM users u JOIN caisses k ON k.idcaisse = u.idcaisse_fixe AND k.supp = 0 WHERE u.id_user = ?');
+        $st->execute([(int)$userId]);
+        return $st->fetch(PDO::FETCH_ASSOC) ?: null;
+    } catch (PDOException $e) { return null; }   // migration 014 non appliquée
+}
+
 function session_courante(PDO $db, $userId)
 {
     $st = $db->prepare("SELECT s.*, c.nom AS caisse FROM sessions_caisse s JOIN caisses c ON c.idcaisse = s.idcaisse WHERE s.iduser = :u AND s.statut = 'ouverte' ORDER BY s.idsession DESC LIMIT 1");
@@ -24,6 +34,11 @@ function session_ouvrir(PDO $db, array $user, array $in)
     if (session_courante($db, $user['id'])) throw new ApiError(409, 'Vous avez déjà une caisse ouverte.');
     $fond = round(nombre($in['fond_initial'] ?? 0, 'fond_initial', 0), 2);
     $idcaisse = (int)($in['idcaisse'] ?? 0);
+    // Utilisateur affecté à une seule caisse : il ne peut ouvrir que celle-là
+    if ($fixe = caisse_fixe($db, $user['id'])) {
+        if ($idcaisse && $idcaisse !== (int)$fixe['idcaisse']) throw new ApiError(403, "Vous êtes affecté à la caisse « {$fixe['nom']} » : vous ne pouvez pas ouvrir une autre caisse.", ['idcaisse' => "Caisse imposée : {$fixe['nom']}"], 'caisse_imposee');
+        $idcaisse = (int)$fixe['idcaisse'];
+    }
     if (!$idcaisse) $idcaisse = (int)$db->query('SELECT idcaisse FROM caisses WHERE actif = 1 AND supp = 0 ORDER BY idcaisse LIMIT 1')->fetchColumn();
     $st = $db->prepare('SELECT * FROM caisses WHERE idcaisse = :i AND actif = 1 AND supp = 0'); $st->execute(['i' => $idcaisse]);
     $caisse = $st->fetch(PDO::FETCH_ASSOC);
