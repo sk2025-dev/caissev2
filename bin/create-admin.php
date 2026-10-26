@@ -3,6 +3,7 @@
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 require_once __DIR__ . '/../connexion/security.php';
 require_once __DIR__ . '/../connexion/conn.php';
+require_once __DIR__ . '/../api/lib/journal.php';
 
 $super = in_array('--super', $argv, true);
 $argv = array_values(array_filter($argv, function ($a) { return $a !== '--super'; })); $argc = count($argv);
@@ -20,4 +21,5 @@ if ((int)$st->fetchColumn() > 0) { fwrite(STDERR, "Cet e-mail existe deja.\n"); 
 
 $bdd->prepare('INSERT INTO users (nomag, prenom, emailag, telag, pass, gpe, user_status, dateenr) VALUES (?,?,?,?,?,?,1,?)')
     ->execute([$nom, '', $email, '', pwd_pour_stockage($pwd), $gpe, gmdate('Y-m-d H:i:s')]);
+journaliser($bdd, null, 'create', 'utilisateurs', (int)$bdd->lastInsertId(), ($super ? 'Super administrateur' : 'Gérant') . " « $nom » créé en ligne de commande", ['emailag' => $email], 'Ligne de commande');
 echo ($super ? "Super administrateur" : "Administrateur") . " cree : $email\n";

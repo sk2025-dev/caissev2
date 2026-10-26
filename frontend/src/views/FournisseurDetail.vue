@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { api, auth } from '../api'
 import { money, date, initiales } from '../format'
 import Icon from '../components/Icon.vue'
+import HistoriqueFiche from '../components/HistoriqueFiche.vue'
 import ReglementModal from '../components/ReglementModal.vue'
 
 const props = defineProps({ id: { type: String, required: true } })
@@ -60,6 +61,7 @@ async function fait() { regler.value = false; await charger() }
           </div>
         </section>
       </div>
+      <HistoriqueFiche entite="fournisseurs" :id="id" style="margin-top:18px" />
     </template>
     <ReglementModal v-if="regler" type="fournisseur" :id="f.idfour" :nom="f.nom" :solde="f.solde" @close="regler = false" @done="fait" />
   </main>

@@ -117,8 +117,8 @@ class Crud
         $st = $this->db->prepare('INSERT INTO ' . $c['table'] . ' (' . implode(', ', $cols) . ') VALUES (:' . implode(', :', $cols) . ')');
         $st->execute($data);
         $id = (int)$this->db->lastInsertId();
-        $this->audit('create', $id, $data);
         $row = $this->find($id);
+        $this->audit('create', $id, $row, array_diff_key($data + $virtuel, array_flip($this->colonnesAudit())));
         if (!empty($c['after_save'])) { $c['after_save']($this->db, $row, $virtuel, $this->user, true); $row = $this->find($id); }   // relue : after_save peut avoir complété la fiche
         return $row;
     }
@@ -143,8 +143,9 @@ class Crud
         $st = $this->db->prepare('UPDATE ' . $c['table'] . ' SET ' . implode(', ', $sets) . " WHERE {$c['pk']} = :_id");
         $st->execute($data);
         unset($data['_id']);
-        $this->audit('update', $id, $data);
         $row = $this->find($id);
+        $diff = journal_diff($existing, $data, $this->colonnesAudit());
+        if ($diff) $this->audit('update', $id, $row, $diff);
         if (!empty($c['after_save'])) { $c['after_save']($this->db, $row, [], $this->user, false); $row = $this->find($id); }
         return $row;
     }
@@ -152,14 +153,14 @@ class Crud
     public function delete($id)
     {
         $c = $this->cfg;
-        $this->find($id);
+        $existing = $this->find($id);
         if (!empty($c['before_delete'])) $c['before_delete']($this->db, $id, $this->user);
         $sets = [];
         $params = ['_id' => $id];
         foreach ($c['soft_delete'] as $col => $val) { $sets[] = "$col = :s_$col"; $params["s_$col"] = $val; }
         $st = $this->db->prepare('UPDATE ' . $c['table'] . ' SET ' . implode(', ', $sets) . " WHERE {$c['pk']} = :_id");
         $st->execute($params);
-        $this->audit('delete', $id, null);
+        $this->audit('delete', $id, $existing, null);
     }
 
     /* ---------- Validation ---------- */
@@ -263,14 +264,19 @@ class Crud
         return $data;
     }
 
-    private function audit($action, $id, $detail)
+    private function colonnesAudit()
     {
-        try {
-            $st = $this->db->prepare('INSERT INTO audit_log (user_id, action, entity, entity_id, detail, ip, created_at) VALUES (?,?,?,?,?,?,?)');
-            $st->execute([$this->user['id'], $action, $this->name, $id, $detail ? json_encode($detail, JSON_UNESCAPED_UNICODE) : null, client_ip(), gmdate('Y-m-d H:i:s')]);
-        } catch (PDOException $e) {
-            error_log('audit_log indisponible : ' . $e->getMessage()); // la migration 004 n'est peut-être pas appliquée
-        }
+        return array_values($this->cfg['audit'] ?? []);
+    }
+
+    /** Journal : création (valeurs saisies), modification (avant / après des seuls champs changés), suppression. */
+    private function audit($action, $id, array $row, $detail)
+    {
+        $nom = journal_libelle($row);
+        $verbe = ['create' => 'créé', 'update' => 'modifié', 'delete' => 'supprimé'][$action];
+        $resume = (JOURNAL_ENTITES[$this->name] ?? $this->name) . ($nom !== '' ? " « $nom »" : " n° $id") . " $verbe";
+        if ($action === 'update' && isset($detail['pass'])) $resume .= count($detail) === 1 ? ' : mot de passe changé' : ', dont le mot de passe';
+        journaliser($this->db, $this->user, $action, $this->name, $id, $resume, $detail);
     }
 }
 

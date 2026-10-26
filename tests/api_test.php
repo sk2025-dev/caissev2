@@ -645,6 +645,27 @@ check('restauration dans une base vierge : mêmes effectifs et même chiffre d\'
 $admin->exec("DROP DATABASE IF EXISTS `{$name}_restore_test`");
 array_map('unlink', glob(__DIR__ . '/../exports/*.{xlsx,csv,pdf,gz}', GLOB_BRACE));
 
+echo "Journal d'activité (traçabilité)\n";
+$jr = function ($sql) use ($pdo) { return $pdo->query("SELECT * FROM audit_log WHERE $sql ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC); };
+$e = $jr("action = 'connexion_echec' AND acteur = 'admin@test.local'"); check('échec de connexion journalisé (compte visé, e-mail saisi, IP)', $e && (int)$e['entity_id'] > 0 && $e['user_id'] === null && $e['ip'] !== '', json_encode($e));
+check('connexion réussie journalisée', (bool)$jr("action = 'connexion' AND module = 'securite'"));
+$e = $jr("action = 'update' AND entity = 'produits' AND entity_id = $eau"); $d = json_decode($e['detail'] ?? '', true);
+check('modification de fiche : seuls les champs changés, avant → après', $e && isset($d['prix_vente']) && (float)$d['prix_vente'][0] === 600.0 && (float)$d['prix_vente'][1] === 500.0 && !isset($d['nom']) && !isset($d['datemodif']), json_encode($e));
+$e = $jr("action = 'perte' AND entity = 'stock' AND entity_id = $eau"); check('perte de stock journalisée sur le produit', $e && strpos($e['resume'], 'Perte de stock') === 0, json_encode($e));
+check('vente et annulation journalisées', (bool)$jr("action = 'vente' AND entity = 'ventes'") && ($e = $jr("action = 'annulation' AND entity = 'ventes' AND entity_id = $vE")) && strpos($e['detail'], 'avis') !== false);
+check('idempotence : la vente renvoyée n\'est journalisée qu\'une fois', (int)$pdo->query("SELECT COUNT(*) FROM audit_log WHERE action = 'vente' AND entity_id = " . (int)$vA['idvente'])->fetchColumn() === 1);
+check('ouverture et clôture de caisse journalisées', (bool)$jr("action = 'ouverture'") && (bool)$jr("action = 'cloture'"));
+check('réception et inventaire journalisés', (bool)$jr("action = 'reception'") && (bool)$jr("action = 'inventaire'"));
+$e = $pdo->query("SELECT * FROM audit_log WHERE entity = 'configuration' AND resume LIKE '%SMTP%' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC); check('configuration : avant → après, mot de passe SMTP masqué', $e && strpos($e['detail'], 'mailer') !== false && strpos($e['detail'], $cfgMail['values']['smtp_pass']) === false, json_encode($e));
+check('aucun mot de passe en clair ni haché dans le journal', (int)$pdo->query("SELECT COUNT(*) FROM audit_log WHERE detail LIKE '%secret123%' OR detail LIKE '%\\$2y\\$%'")->fetchColumn() === 0);
+check('sauvegarde de la base journalisée', (bool)$jr("action = 'sauvegarde'"));
+list($c, $j) = $a->call('GET', 'journal', ['module' => 'ventes']); check('journal consultable par le gérant, filtre par module', $c === 200 && $j['meta']['total'] > 0 && count(array_filter($j['data'], function ($x) { return $x['module'] !== 'ventes'; })) === 0, json_encode($j['meta'] ?? $j));
+list($c, $j) = $a->call('GET', 'journal', ['entite' => 'produits,stock', 'entite_id' => $eau]); check('historique d\'une fiche produit (fiche + stock)', $c === 200 && count(array_unique(array_column($j['data'], 'entity'))) === 2, json_encode(array_column($j['data'] ?? [], 'entity')));
+list($c, $j) = $a->call('GET', 'journal', ['per_page' => 100]); check('le gérant ne voit pas les actions du super administrateur', $c === 200 && !in_array('superadmin', array_column($j['data'], 'role'), true));
+list($c) = $k->call('GET', 'journal'); check('journal refusé au caissier', $c === 403);
+list($c) = $m->call('GET', 'journal'); check('journal refusé au magasinier', $c === 403);
+list($c) = $a->call('DELETE', 'journal', ['id' => 1]); check('le journal ne se supprime pas par l\'API', $c === 405);
+
 proc_terminate($proc); @exec("pkill -f 127.0.0.1:$port");   // les processus enfants du serveur interne
 echo "\n$ok réussis, $ko échec(s)\n";
 exit($ko ? 1 : 0);

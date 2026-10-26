@@ -5,13 +5,14 @@
  *   caisse : pos-catalogue · mouvements-caisse · session-* · operation-caisse · depense-creer · categorie-mouvement-creer · justificatif · vente-creer · ventes · vente · vente-annuler · paniers
  *   commandes : commandes · commande · commande-creer · commande-statut · commande-livrer · commande-annuler
  *   stock : stock-ajuster · inventaire · inventaires · mouvements-stock · stock-balance    achats : appro-creer · appros · appro · reglement-creer · reglements
- *   fiches : produit-detail · client-detail · fournisseur-detail
+ *   fiches : produit-detail · client-detail · fournisseur-detail    traçabilité : journal
  *   ressources CRUD : produits · categories · clients · fournisseurs · caisses · utilisateurs
  */
 require_once __DIR__ . '/../connexion/security.php';
 require_once __DIR__ . '/../connexion/settings.php';
 require_once __DIR__ . '/lib/http.php';
 require_once __DIR__ . '/lib/permissions.php';
+require_once __DIR__ . '/lib/journal.php';
 require_once __DIR__ . '/lib/crud.php';
 require_once __DIR__ . '/lib/auth.php';
 require_once __DIR__ . '/lib/stock.php';
@@ -82,6 +83,7 @@ $reglages = settings_all($bdd);
 
 // Déconnexion après inactivité (durée réglée par le super administrateur)
 if (session_inactive(isset($_SESSION['derniere_activite']) ? $_SESSION['derniere_activite'] : null, $reglages['session.minutes'])) {
+    journaliser($bdd, $user, 'deconnexion', 'utilisateurs', $user['id'], 'Déconnexion automatique après inactivité');
     api_logout();
     throw new ApiError(401, 'Session expirée après une période d\'inactivité. Reconnectez-vous.', null, 'inactivite');
 }
@@ -98,6 +100,7 @@ if ($method !== 'GET') api_check_csrf();
 
 if ($r === 'auth/logout') {
     if ($method !== 'POST') throw new ApiError(405, 'Méthode non autorisée');
+    journaliser($bdd, $user, 'deconnexion', 'utilisateurs', $user['id'], 'Déconnexion');
     api_logout();
     json_out(['ok' => true]);
 }
@@ -105,6 +108,8 @@ if ($r === 'auth/logout') {
 $q = $_GET;
 $corps = $method === 'GET' ? [] : request_input();
 $post = function () use ($method) { if ($method !== 'POST') throw new ApiError(405, 'Méthode non autorisée'); };
+$devise = ' ' . $reglages['entreprise.devise'];
+$statutsCommande = ['nouvelle' => 'reçue', 'preparation' => 'en préparation', 'prete' => 'prête', 'en_livraison' => 'en livraison', 'livree' => 'livrée', 'annulee' => 'annulée'];
 
 switch ($r) {
     case 'dashboard': json_out(dashboard_data($bdd, $user));
@@ -127,7 +132,11 @@ switch ($r) {
         ]);
 
     case 'carte': json_out(utilisateur_carte($bdd, $user, $id));
-    case 'carte-photo': $post(); json_out(utilisateur_photo($bdd, $user, $id, $_FILES, $corps));
+    case 'carte-photo':
+        $post();
+        $carte = utilisateur_photo($bdd, $user, $id, $_FILES, $corps);
+        journaliser($bdd, $user, 'update', 'utilisateurs', $carte['id'], 'Photo de « ' . trim($carte['prenom'] . ' ' . $carte['nom']) . ' » ' . ($carte['photo'] ? 'modifiée' : 'retirée'), ['photo_user' => [null, $carte['photo']]]);
+        json_out($carte);
 
     case 'search': json_out(recherche_globale($bdd, $user, isset($q['q']) ? $q['q'] : ''));
 
@@ -135,12 +144,36 @@ switch ($r) {
     case 'pos-catalogue': exiger($user, 'caisse.vendre'); json_out(pos_catalogue($bdd));
     case 'session-courante': json_out(['session' => session_courante($bdd, $user['id'])]);
     case 'caisses-occupation': json_out(['occupees' => caisses_occupation($bdd, $user)]);
-    case 'session-ouvrir': $post(); json_out(['session' => session_ouvrir($bdd, $user, $corps)], 201);
-    case 'session-cloturer': $post(); json_out(['rapport' => session_cloturer($bdd, $user, $corps)]);
+    case 'session-ouvrir':
+        $post();
+        $s = session_ouvrir($bdd, $user, $corps);
+        journaliser($bdd, $user, 'ouverture', 'sessions_caisse', $s['idsession'], "Ouverture de la caisse « {$s['caisse']} » · fond " . journal_montant($s['fond_initial']) . $devise, ['fond_initial' => $s['fond_initial'] + 0]);
+        json_out(['session' => $s], 201);
+    case 'session-cloturer':
+        $post();
+        $rap = session_cloturer($bdd, $user, $corps); $s = $rap['session'];
+        $ecart = (float)$s['ecart'];
+        journaliser($bdd, $user, 'cloture', 'sessions_caisse', $s['idsession'], "Clôture de la caisse « {$s['caisse']} » ({$rap['numero_z']}) · " . ($ecart == 0 ? 'sans écart' : 'écart ' . ($ecart > 0 ? '+' : '') . journal_montant($ecart) . $devise),
+            ['caissier' => $s['caissier'], 'attendu_especes' => $s['attendu_especes'] + 0, 'compte_especes' => $s['compte_especes'] + 0, 'ecart' => $ecart, 'ventes' => $rap['ventes']['nb'], 'chiffre_affaires' => $rap['ventes']['ca'], 'note' => $s['notes']]);
+        json_out(['rapport' => $rap]);
     case 'session-forcer-cloture': $post(); json_out(['rapport' => session_forcer_cloture($bdd, $user, $corps)]);
-    case 'operation-caisse': $post(); json_out(['operation' => operation_caisse($bdd, $user, $corps)], 201);
-    case 'depense-creer': $post(); json_out(['operation' => depense_creer($bdd, $user, $corps, $_FILES)], 201);
-    case 'categorie-mouvement-creer': $post(); json_out(['categorie' => categorie_mouvement_creer($bdd, $user, $corps), 'categories_mvt' => mouvements_categories()], 201);
+    case 'operation-caisse':
+        $post();
+        $op = operation_caisse($bdd, $user, $corps);
+        journaliser($bdd, $user, $op['type'], 'caisse_operations', $op['idop'], ($op['type'] === 'entree' ? "Entrée d'espèces " : "Sortie d'espèces ") . $op['numero'] . ' · ' . journal_montant($op['montant']) . $devise,
+            ['categorie' => mouvement_libelle($op['type'], (string)$corps['categorie']), 'motif' => (string)$corps['motif'], 'justificatif' => (string)($corps['reference'] ?? '')]);
+        json_out(['operation' => $op], 201);
+    case 'depense-creer':
+        $post();
+        $op = depense_creer($bdd, $user, $corps, $_FILES);
+        journaliser($bdd, $user, 'depense', 'caisse_operations', $op['idop'], "Dépense hors caisse {$op['numero']} · " . journal_montant($op['montant']) . $devise,
+            ['categorie' => mouvement_libelle('sortie', (string)$corps['categorie']), 'motif' => (string)$corps['motif'], 'reglee_par' => mouvements_sources()[$op['source']], 'piece_jointe' => $op['justificatif'] ? 'oui' : 'non']);
+        json_out(['operation' => $op], 201);
+    case 'categorie-mouvement-creer':
+        $post();
+        $cat = categorie_mouvement_creer($bdd, $user, $corps);
+        if (!$cat['existait']) journaliser($bdd, $user, 'create', 'categories_mouvement', null, "Catégorie de " . ($cat['type'] === 'entree' ? 'recette' : 'dépense') . " « {$cat['libelle']} » créée");
+        json_out(['categorie' => $cat, 'categories_mvt' => mouvements_categories()], 201);
     case 'justificatif': justificatif_envoyer($bdd, $user, $id);
     case 'session-rapport':
         $rap = session_rapport($bdd, $id);
@@ -151,10 +184,19 @@ switch ($r) {
         if (!role_peut($user['role'], 'ventes.lire_toutes') && !role_peut($user['role'], 'caisse.vendre')) throw new ApiError(403, "Votre rôle ne permet pas cette action.");
         json_out(mouvements_caisse_liste($bdd, $user, $q));
 
-    case 'vente-creer': $post(); json_out(['vente' => vente_creer($bdd, $user, $corps)], 201);
+    case 'vente-creer':
+        $post();
+        $v = vente_creer($bdd, $user, $corps);
+        if (empty($v['deja_enregistree'])) journaliser($bdd, $user, 'vente', 'ventes', $v['idvente'], "Vente {$v['numero']} · " . journal_montant($v['total']) . $devise . ($v['client'] ? " · {$v['client']}" : '') . ($v['reste'] > 0 ? ' · crédit ' . journal_montant($v['reste']) . $devise : ''),
+            ['caisse' => $v['caisse'], 'articles' => count($v['lignes']), 'remise' => $v['remise'] + 0, 'paiements' => implode(', ', array_map(function ($p) { return $p['libelle'] . ' ' . journal_montant($p['montant']); }, $v['paiements']))]);
+        json_out(['vente' => $v], 201);
     case 'ventes': json_out(ventes_liste($bdd, $user, $q));
     case 'vente': if (!$id) throw new ApiError(400, 'Identifiant requis'); json_out(['vente' => vente_detail($bdd, $user, $id)]);
-    case 'vente-annuler': $post(); json_out(['vente' => vente_annuler($bdd, $user, $corps)]);
+    case 'vente-annuler':
+        $post();
+        $v = vente_annuler($bdd, $user, $corps);
+        journaliser($bdd, $user, 'annulation', 'ventes', $v['idvente'], "Annulation de la vente {$v['numero']} · " . journal_montant($v['total']) . $devise, ['caissier' => $v['caissier'], 'motif' => $v['annule_motif']]);
+        json_out(['vente' => $v]);
     case 'paniers':
         exiger($user, 'caisse.vendre');
         if ($method === 'GET') json_out(['paniers' => paniers_lister($bdd, $user)]);
@@ -165,30 +207,74 @@ switch ($r) {
     /* ---- Commandes et livraisons ---- */
     case 'commandes': json_out(commandes_liste($bdd, $user, $q));
     case 'commande': if (!$id) throw new ApiError(400, 'Identifiant requis'); json_out(['commande' => commande_detail($bdd, $user, $id)]);
-    case 'commande-creer': $post(); json_out(['commande' => commande_creer($bdd, $user, $corps)], 201);
-    case 'commande-statut': $post(); json_out(['commande' => commande_statut($bdd, $user, $corps)]);
-    case 'commande-livrer': $post(); json_out(commande_livrer($bdd, $user, $corps));
-    case 'commande-annuler': $post(); json_out(['commande' => commande_annuler($bdd, $user, $corps)]);
+    case 'commande-creer':
+        $post();
+        $c = commande_creer($bdd, $user, $corps);
+        journaliser($bdd, $user, 'create', 'commandes', $c['idcommande'], "Commande {$c['numero']} · " . journal_montant($c['total']) . $devise . ($c['client_nom'] !== '' ? " · {$c['client_nom']}" : ''), ['mode' => $c['mode'], 'adresse' => $c['adresse'], 'articles' => count($c['lignes'])]);
+        json_out(['commande' => $c], 201);
+    case 'commande-statut':
+        $post();
+        $c = commande_statut($bdd, $user, $corps);
+        journaliser($bdd, $user, 'statut', 'commandes', $c['idcommande'], "Commande {$c['numero']} " . ($statutsCommande[$c['statut']] ?? $c['statut']), $c['statut'] === 'en_livraison' ? ['livreur' => $c['livreur']] : null);
+        json_out(['commande' => $c]);
+    case 'commande-livrer':
+        $post();
+        $st = $bdd->prepare('SELECT statut FROM commandes WHERE idcommande = ?'); $st->execute([(int)($corps['idcommande'] ?? 0)]);
+        $dejaLivree = $st->fetchColumn() === 'livree';   // renvoi réseau : la remise est déjà journalisée
+        $res = commande_livrer($bdd, $user, $corps); $c = $res['commande'];
+        if (!$dejaLivree) journaliser($bdd, $user, 'livraison', 'commandes', $c['idcommande'], "Commande {$c['numero']} remise au client · vente " . ($res['vente']['numero'] ?? '') . ' · ' . journal_montant($res['vente']['total'] ?? 0) . $devise);
+        json_out($res);
+    case 'commande-annuler':
+        $post();
+        $c = commande_annuler($bdd, $user, $corps);
+        journaliser($bdd, $user, 'annulation', 'commandes', $c['idcommande'], "Annulation de la commande {$c['numero']}", ['motif' => $c['annule_motif']]);
+        json_out(['commande' => $c]);
 
     /* ---- Stock et achats ---- */
-    case 'stock-ajuster': $post(); json_out(['resultat' => stock_ajuster($bdd, $user, $corps)], 201);
-    case 'inventaire': $post(); json_out(['resultat' => inventaire_creer($bdd, $user, $corps)], 201);
+    case 'stock-ajuster':
+        $post();
+        $res = stock_ajuster($bdd, $user, $corps);
+        $perte = ($corps['type'] ?? '') === 'perte';
+        journaliser($bdd, $user, $perte ? 'perte' : 'ajustement', 'stock', $res['idprod'], ($perte ? 'Perte' : 'Ajustement') . " de stock « {$res['nom']} » : " . journal_qte($res['avant']) . ' → ' . journal_qte($res['apres']),
+            ['stock' => [$res['avant'], $res['apres']], 'motif' => (string)($corps['motif'] ?? '')]);
+        json_out(['resultat' => $res], 201);
+    case 'inventaire':
+        $post();
+        $res = inventaire_creer($bdd, $user, $corps);
+        journaliser($bdd, $user, 'inventaire', 'inventaires', $res['idinv'], "Inventaire validé · {$res['nb_lignes']} article(s) compté(s), {$res['nb_ecarts']} écart(s) · " . journal_montant($res['valeur_ecart']) . $devise,
+            ['ecarts' => array_slice($res['ecarts'], 0, 100)]);
+        json_out(['resultat' => $res], 201);
     case 'mouvements-stock': exiger($user, 'stock.lire'); json_out(mouvements_liste($bdd, $q));
     case 'stock-balance': exiger($user, 'stock.lire'); json_out(stock_balance($bdd, isset($q['mois']) ? $q['mois'] : ''));
-    case 'appro-creer': $post(); json_out(['appro' => appro_creer($bdd, $user, $corps)], 201);
+    case 'appro-creer':
+        $post();
+        $a = appro_creer($bdd, $user, $corps);
+        journaliser($bdd, $user, 'reception', 'approvisionnements', $a['idappro'], "Réception {$a['numero']} · {$a['fournisseur']} · " . journal_montant($a['total']) . $devise, ['bon' => $a['numero_bon'], 'articles' => count($a['lignes']), 'paye' => $a['paye'] + 0, 'reste' => $a['reste'] + 0]);
+        json_out(['appro' => $a], 201);
     case 'appros': exiger($user, 'achats.lire'); json_out(appros_liste($bdd, $q));
     case 'appro': exiger($user, 'achats.lire'); json_out(['appro' => appro_detail($bdd, $id)]);
-    case 'reglement-creer': $post(); json_out(['reglement' => reglement_creer($bdd, $user, $corps)], 201);
+    case 'reglement-creer':
+        $post();
+        $reg = reglement_creer($bdd, $user, $corps);
+        $fournisseur = ($corps['tiers_type'] ?? '') === 'fournisseur';
+        journaliser($bdd, $user, 'reglement', $fournisseur ? 'fournisseurs' : 'clients', (int)$corps['tiers_id'], ($fournisseur ? 'Paiement au fournisseur' : 'Règlement du client') . " « {$reg['tiers']} » · " . journal_montant($reg['montant']) . $devise,
+            ['mode' => (string)($corps['mode'] ?? ''), 'reference' => (string)($corps['reference'] ?? ''), 'solde_restant' => $reg['solde']]);
+        json_out(['reglement' => $reg], 201);
 
     /* ---- Fiches détaillées ---- */
     case 'produit-detail': json_out(produit_detail($bdd, $user, $id, $resources));
     case 'client-detail': json_out(client_detail($bdd, $user, $id, $resources));
     case 'fournisseur-detail': exiger($user, 'fournisseurs.lire'); json_out(fournisseur_detail($bdd, $user, $id, $resources));
 
+    /* ---- Traçabilité ---- */
+    case 'journal': if ($method !== 'GET') throw new ApiError(405, 'Le journal est en lecture seule.'); json_out(journal_liste($bdd, $user, $q));
+
     /* ---- Exports asynchrones : la tâche est créée, la réponse part tout de suite, le fichier se prépare en arrière-plan ---- */
     case 'export-create':
         $post();
         $job = export_create($bdd, $user, $corps);
+        $pub = export_public($job);
+        journaliser($bdd, $user, $pub['kind'] === 'database' ? 'sauvegarde' : 'export', 'exports', $pub['id'], $pub['kind'] === 'database' ? 'Sauvegarde complète de la base' : 'Export « ' . $pub['kind'] . ' » (' . strtoupper($pub['format']) . ')' . ($pub['from'] ? " du {$pub['from']} au {$pub['to']}" : ''));
         json_then(['job' => export_public($job)], 202);
         export_run($bdd, (int)$job['id']);
         exit;
@@ -231,7 +317,10 @@ if (strpos($r, 'config') === 0) {
         $section = isset($corps['section']) ? (string)$corps['section'] : '';
         $valeurs = config_valider($section, isset($corps['values']) && is_array($corps['values']) ? $corps['values'] : [], $reglages);
         foreach ($valeurs as $cle => $v) settings_set($bdd, $cle, $v, $user['id']);
-        try { $bdd->prepare('INSERT INTO audit_log (user_id, action, entity, entity_id, detail, ip, created_at) VALUES (?,?,?,?,?,?,?)')->execute([$user['id'], 'update', 'configuration', null, json_encode(['section' => $section], JSON_UNESCAPED_UNICODE), client_ip(), gmdate('Y-m-d H:i:s')]); } catch (PDOException $e) {}
+        $titres = ['entreprise' => "Informations de l'entreprise", 'copyright' => 'Mention de copyright', 'theme' => 'Thème', 'documents' => 'En-têtes des documents', 'licence' => "Licence d'utilisation",
+            'session' => "Délai d'inactivité", 'mail' => 'E-mail (SMTP)', 'alertes' => 'Alertes', 'caisse' => 'Règles de caisse et ticket'];
+        $diff = journal_diff($reglages, $valeurs);
+        if ($diff) journaliser($bdd, $user, 'update', 'configuration', null, 'Configuration modifiée : ' . ($titres[$section] ?? $section), $diff);
         json_out(config_complete($bdd));
     }
     if ($r === 'config-logo' && $method === 'POST') {
@@ -240,10 +329,11 @@ if (strpos($r, 'config') === 0) {
         if ($f['error'] === UPLOAD_ERR_OK && $f['size'] > 2 * 1024 * 1024) throw new ApiError(422, 'Fichier trop volumineux', ['logo' => '2 Mo maximum']);
         $nom = store_upload($f, 'logo', ['png', 'jpg', 'jpeg', 'webp']);
         settings_set($bdd, 'entreprise.logo', $nom, $user['id']);
+        journaliser($bdd, $user, 'update', 'configuration', null, "Logo de l'entreprise modifié", ['entreprise.logo' => [$reglages['entreprise.logo'], $nom]]);
         json_out(config_complete($bdd));
     }
     if ($r === 'config-mail-test' && $method === 'POST') json_out(alertes_test($bdd));
-    if ($r === 'config-alertes-envoyer' && $method === 'POST') json_out(alertes_envoyer($bdd, true, 'manuel'));
+    if ($r === 'config-alertes-envoyer' && $method === 'POST') { journaliser($bdd, $user, 'envoi', 'configuration', null, 'Envoi manuel du résumé des alertes'); json_out(alertes_envoyer($bdd, true, 'manuel')); }
     throw new ApiError(404, 'Route de configuration inconnue');
 }
 

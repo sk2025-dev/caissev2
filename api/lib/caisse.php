@@ -124,10 +124,7 @@ function session_forcer_cloture(PDO $db, array $user, array $in)
         $motif = mb_substr($motif, 0, 200);
         $db->prepare("UPDATE sessions_caisse SET statut = 'cloturee', cloture_at = ?, compte_especes = NULL, attendu_especes = ?, ecart = NULL, notes = ?, forcee_par = ?, forcee_motif = ? WHERE idsession = ?")
             ->execute([gmdate('Y-m-d H:i:s'), $rap['attendu_especes'], mb_substr('Clôture forcée par ' . $user['nom'] . ' : ' . $motif, 0, 500), $user['id'], $motif, $id]);
-        try {
-            $db->prepare('INSERT INTO audit_log (user_id, action, entity, entity_id, detail, ip, created_at) VALUES (?,?,?,?,?,?,?)')
-                ->execute([$user['id'], 'cloture_forcee', 'sessions_caisse', $id, json_encode(['caisse' => $s['caisse'], 'caissier' => trim($s['caissier']), 'attendu_especes' => $rap['attendu_especes'], 'motif' => $motif], JSON_UNESCAPED_UNICODE), client_ip(), gmdate('Y-m-d H:i:s')]);
-        } catch (PDOException $e) { error_log('audit_log indisponible : ' . $e->getMessage()); }
+        journaliser($db, $user, 'cloture_forcee', 'sessions_caisse', $id, "Clôture forcée de la caisse « {$s['caisse']} » de " . trim($s['caissier']), ['caisse' => $s['caisse'], 'caissier' => trim($s['caissier']), 'attendu_especes' => $rap['attendu_especes'], 'motif' => $motif]);
         return session_rapport($db, $id);
     });
 }

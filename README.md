@@ -17,6 +17,7 @@ Aucune dépendance côté serveur (pas de Composer) : les exports Excel/PDF, l'e
 | **Achats** | Fournisseurs, réceptions de marchandises (mise à jour du stock et du **coût moyen pondéré**), dettes fournisseurs et paiements partiels |
 | **Clients** | Fichier clients, plafond de crédit, dettes et règlements partiels (encaissés dans la caisse ouverte si espèces) |
 | **Pilotage** | Tableau de bord (chiffre d'affaires, marge, créances, top produits, répartitions, affluence par heure, performance des caissiers), alertes (ruptures, stocks bas, créances anciennes, écarts de caisse), recherche globale |
+| **Journal d'activité** *(gérant)* | Traçabilité complète en lecture seule : connexions (réussies, échouées, bloquées), déconnexions, ventes et annulations, ouvertures et clôtures de caisse, entrées/sorties d'espèces, dépenses, commandes, ajustements, pertes et inventaires, réceptions, règlements, exports, sauvegardes, configuration. Chaque entrée indique l'utilisateur, la date à la seconde, l'adresse IP et les **valeurs avant / après** des champs modifiés (mots de passe jamais enregistrés). Filtres par module, utilisateur, période et recherche ; **historique** sur les fiches produit, client et fournisseur |
 | **Exports** | Ventes et stock en Excel, CSV, PDF — **générés en arrière-plan**, suivis dans « Mes exports » ; sauvegarde complète de la base (`.sql.gz`) |
 | **Configuration** *(super administrateur)* | Entreprise et logo, thème (6 palettes, mode sombre), durée d'utilisation (licence), règles de caisse, tickets personnalisables (logo, coordonnées, RCCM/NIF, en-tête et pied sur plusieurs lignes, aperçu, 58/80 mm), e-mail d'alertes (SMTP), sauvegarde |
 
@@ -70,7 +71,7 @@ MySQL doit être démarré dans XAMPP avant `npm run dev`. Vite lance automatiqu
 
 ### Tests
 ```bash
-php tests/api_test.php     # 244 vérifications sur une base dédiée « caisse_test » (jamais la vôtre)
+php tests/api_test.php     # vérifications sur une base dédiée « caisse_test » (jamais la vôtre)
 ```
 Variables : `TEST_DB_HOST`, `TEST_DB_PORT`, `TEST_DB_USER`, `TEST_DB_PASS`. Le test couvre droits, catalogue, stock, achats, ventes
 (crédit, paiements mixtes, concurrence, idempotence, annulation), sessions de caisse, tableau de bord, exports, e-mail (faux serveur SMTP),
@@ -101,6 +102,7 @@ Un seul dossier à publier, adresses relatives : fonctionne à la racine d'un do
    php bin/migrate.php
    php bin/create-admin.php vous@exemple.com "Votre Nom" "motdepasse8+" --super
    ```
+   Mot de passe oublié : `php bin/reset-password.php vous@exemple.com "nouveaumotdepasse"` (réactive le compte et lève le blocage après échecs).
    Sans accès terminal, planifier une tâche cron ponctuelle exécutant `php /chemin/vers/caisse/bin/migrate.php`, puis la supprimer.
 7. **Vérifier** : ouvrir `https://votre-domaine/…/`, se connecter, puis *Configuration* : nom de l'entreprise, logo, TVA par défaut, ticket, e-mail d'alertes.
 8. **Alertes e-mail (facultatif)** : tâche cron quotidienne `0 7 * * * php /chemin/vers/caisse/bin/send-alerts.php`. Sans cron, le résumé part automatiquement à la première connexion de la journée.
@@ -116,7 +118,7 @@ api/            routeur (index.php), ressources CRUD déclaratives (resources.ph
 connexion/      accès base, réglages, sécurité (sessions, CSRF), variables d'environnement
 migrations/     schéma SQL puis migrations .sql/.php appliquées dans l'ordre (table de suivi)
 frontend/src/   Vue 3 : views/ (écrans), components/ (composants), resources.js (écrans CRUD déclaratifs)
-bin/            migrate · create-admin · seed-demo · send-alerts
+bin/            migrate · create-admin · reset-password · seed-demo · send-alerts
 tests/          test d'intégration HTTP complet + faux serveur SMTP
 ```
 

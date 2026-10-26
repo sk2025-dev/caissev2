@@ -24,6 +24,7 @@ const routes = [
   page('caisses', 'Caisses', { admin: true }),
   page('zones-livraison', 'Tarifs de livraison', { admin: true }),
   page('utilisateurs', 'Utilisateurs', { admin: true }),
+  { path: '/journal', component: () => import('./views/Journal.vue'), meta: { title: "Journal d'activité", admin: true } },
   { path: '/configuration', component: () => import('./views/Configuration.vue'), meta: { title: 'Configuration', super: true } },
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ]

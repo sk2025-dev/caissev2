@@ -47,13 +47,15 @@ function api_login(PDO $db, $email, $pwd)
         $tentatives = (int)$st->fetchColumn();
     } catch (PDOException $e) { /* table absente : migration 004 non appliquée */ }
     if ($tentatives !== null && $tentatives >= LOGIN_MAX_ECHECS) {
+        journaliser($db, null, 'connexion_bloquee', 'utilisateurs', null, "Connexion refusée : trop d'échecs pour « $email »", ['email' => $email], $email);
         throw new ApiError(429, 'Trop de tentatives. Réessayez dans ' . LOGIN_FENETRE_MIN . ' minutes.');
     }
 
     $st = $db->prepare('SELECT u.*, g.coden FROM users u JOIN table_gpe_users g ON g.idgpe = u.gpe WHERE u.emailag = :m AND u.user_status = 1');
     $st->execute(['m' => $email]);
-    $trouves = [];
+    $trouves = []; $compte = null;
     while ($u = $st->fetch(PDO::FETCH_ASSOC)) {
+        $compte = $compte ?: (int)$u['id_user'];
         if (pwd_verifie((string)$pwd, $u['pass'])) $trouves[] = $u;
     }
 
@@ -61,6 +63,7 @@ function api_login(PDO $db, $email, $pwd)
         try {
             $db->prepare('INSERT INTO login_attempts (email, ip, created_at) VALUES (?,?,?)')->execute([$email, $ip, gmdate('Y-m-d H:i:s')]);
         } catch (PDOException $e) {}
+        journaliser($db, null, 'connexion_echec', 'utilisateurs', $compte, $compte ? "Mot de passe erroné pour « $email »" : "Connexion refusée : compte « $email » inconnu ou inactif", ['email' => $email], $email);
         throw new ApiError(401, 'Identifiants incorrects ou compte inactif.');
     }
     $u = $trouves[0];
@@ -88,6 +91,7 @@ function api_login(PDO $db, $email, $pwd)
     try {
         $db->prepare('INSERT INTO table_histoconnexion (ipaddress, user_email, datecon, statconn) VALUES (?,?,?,1)')->execute([$ip, $email, gmdate('Y-m-d H:i:s')]);
     } catch (PDOException $e) {}
+    journaliser($db, api_current_user(), 'connexion', 'utilisateurs', $u['id_user'], 'Connexion', ['navigateur' => mb_substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 200)]);
 }
 
 function api_logout()

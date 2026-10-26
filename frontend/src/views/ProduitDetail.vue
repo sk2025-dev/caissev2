@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { api, fileUrl } from '../api'
 import { money, qty, dateHeure, uniteAccord } from '../format'
 import Icon from '../components/Icon.vue'
+import HistoriqueFiche from '../components/HistoriqueFiche.vue'
 
 const props = defineProps({ id: { type: String, required: true } })
 const d = ref(null)
@@ -59,6 +60,7 @@ const marge = computed(() => (p.value && Number(p.value.prix_vente) > 0 ? Math.r
           </div>
         </div>
       </section>
+      <HistoriqueFiche entite="produits,stock" :id="id" style="margin-top:18px" />
     </template>
   </main>
 </template>

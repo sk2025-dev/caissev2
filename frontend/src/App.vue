@@ -59,7 +59,7 @@ const nav = computed(() => [
   { sep: 'Tiers' },
   { to: '/clients', label: 'Clients', icon: 'user' },
   { to: '/fournisseurs', label: 'Fournisseurs', icon: 'briefcase', droit: 'fournisseurs' },
-  ...(auth.user?.admin ? [{ sep: 'Administration' }, { to: '/caisses', label: 'Caisses', icon: 'wallet' }, { to: '/zones-livraison', label: 'Tarifs de livraison', icon: 'truck' }, { to: '/utilisateurs', label: 'Utilisateurs', icon: 'users' }] : []),
+  ...(auth.user?.admin ? [{ sep: 'Administration' }, { to: '/caisses', label: 'Caisses', icon: 'wallet' }, { to: '/zones-livraison', label: 'Tarifs de livraison', icon: 'truck' }, { to: '/utilisateurs', label: 'Utilisateurs', icon: 'users' }, { to: '/journal', label: "Journal d'activité", icon: 'history' }] : []),
   ...(auth.user?.super ? [{ to: '/configuration', label: 'Configuration', icon: 'settings' }] : []),
 ].filter((n) => n.sep || droit(n.droit)))
 // Entrée de menu active aussi sur ses sous-pages (ex. /vehicules/3) ; « / » uniquement en exact
