@@ -679,6 +679,9 @@ list($c, $j) = $anon->call('GET', 'catalogue'); $pr = $j['produits'] ?? []; $riz
 check('catalogue ouvert sans compte : produits, prix, disponibilité', $c === 200 && $rizPub && $rizPub['prix'] == 4000 && in_array($rizPub['dispo'], ['ok', 'bas', 'rupture'], true), json_encode($j));
 check('catalogue : ni prix d\'achat ni quantité en stock', $c === 200 && strpos(json_encode($j), 'prix_achat') === false && strpos(json_encode($j), 'stock_qty') === false);
 check('catalogue : note des avis', $rizPub && $rizPub['note'] == 3.5 && $rizPub['nb_avis'] === 2);
+list(, $j) = $anon->call('GET', 'catalogue'); $rizPub = current(array_filter($j['produits'], function ($p) use ($riz) { return $p['id'] === (int)$riz; }));
+check('catalogue : origine et nouveauté pour les filtres', $rizPub['origine'] === 'Thaïlande' && $rizPub['nouveau'] === true && array_key_exists('image', $j['categories'][0] ?? []), json_encode($rizPub));
+list($c) = $anon->call('GET', 'catalogue-image', ['d' => 'categories', 'f' => 'inexistante.jpg']); check('photo de catégorie : uniquement une catégorie du catalogue', $c === 404);
 $m->call('POST', 'produits', ['id' => $savon], ['catalogue' => 0]);
 list(, $j) = $anon->call('GET', 'catalogue'); check('produit retiré du catalogue (toujours vendu en caisse)', !in_array((int)$savon, array_column($j['produits'], 'id'), true));
 list($c) = $anon->call('GET', 'catalogue-produit', ['id' => $savon]); check('fiche d\'un produit retiré -> 404', $c === 404);
