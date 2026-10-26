@@ -1,7 +1,8 @@
 <script setup>
-// Zone de dépôt : glisser-déposer ou parcourir, aperçu des images, contrôle du type et de la taille côté client.
+// Zone de dépôt : glisser-déposer, parcourir ou coller une image, aperçu des images, contrôle du type et de la taille côté client.
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import Icon from './Icon.vue'
+import { recevoirCollage, lireImage, collageDisponible, raccourciColler } from '../clipboard'
 
 const props = defineProps({
   modelValue: { type: File, default: null },
@@ -18,8 +19,10 @@ const over = ref(false)
 const problem = ref('')
 const preview = ref('')
 const input = ref(null)
+const zone = ref(null)
 const exts = computed(() => props.accept.split(',').map((x) => x.trim().replace('.', '').toLowerCase()).filter(Boolean))
 const isImg = (name) => /\.(jpe?g|png|gif|webp)$/i.test(name || '')
+const imagesOk = computed(() => !exts.value.length || exts.value.some((e) => /^(jpe?g|png|gif|webp)$/.test(e)))
 const size = (b) => (b < 1024 * 1024 ? `${Math.max(1, Math.round(b / 1024))} Ko` : `${(b / 1024 / 1024).toFixed(1)} Mo`)
 
 function take(file) {
@@ -33,15 +36,18 @@ function take(file) {
 function clear() { problem.value = ''; emit('update:modelValue', null); if (input.value) input.value.value = '' }
 function onDrop(e) { over.value = false; take(e.dataTransfer?.files?.[0]) }
 
+const collage = recevoirCollage(() => (imagesOk.value ? zone.value : null), take)
+async function coller() { try { take(await lireImage()) } catch (e) { problem.value = e.message } }
+
 watch(() => props.modelValue, (f) => {
   if (preview.value) URL.revokeObjectURL(preview.value)
   preview.value = f && isImg(f.name) ? URL.createObjectURL(f) : ''
 })
-onBeforeUnmount(() => preview.value && URL.revokeObjectURL(preview.value))
+onBeforeUnmount(() => { if (preview.value) URL.revokeObjectURL(preview.value); collage.retirer() })
 </script>
 
 <template>
-  <div class="drop-wrap">
+  <div ref="zone" class="drop-wrap" @pointerenter="collage.activer" @focusin="collage.activer">
     <div v-if="modelValue" class="drop-file">
       <img v-if="preview" :src="preview" alt="" class="thumb" />
       <span v-else class="thumb doc"><Icon name="file" :size="24" /></span>
@@ -56,7 +62,8 @@ onBeforeUnmount(() => preview.value && URL.revokeObjectURL(preview.value))
     >
       <input :id="id" ref="input" type="file" class="sr-only" :accept="accept" @change="take($event.target.files[0])" />
       <span class="icon"><Icon name="upload" :size="24" /></span>
-      <span class="txt"><b>{{ over ? 'Relâchez pour déposer' : 'Glissez un fichier ici' }}</b><span>ou <u>parcourez vos dossiers</u></span></span>
+      <span class="txt"><b>{{ over ? 'Relâchez pour déposer' : 'Glissez un fichier ici' }}</b><span>ou <u>parcourez vos dossiers</u><template v-if="imagesOk"> · collez une image ({{ raccourciColler }})</template></span></span>
+      <button v-if="imagesOk && collageDisponible" type="button" class="btn sm paste" @click.prevent.stop="coller"><Icon name="clipboard" :size="15" /> Coller l'image</button>
       <span class="rules">{{ exts.map((e) => e.toUpperCase()).join(' · ') }} · {{ maxMb }} Mo max</span>
     </label>
 

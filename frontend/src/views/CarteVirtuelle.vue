@@ -1,18 +1,20 @@
 <script setup>
 // Carte virtuelle du personnel (format carte bancaire 85,6 × 54 mm) : recto avec photo, verso avec l'entreprise.
 // Aux couleurs du thème ; imprimable à taille réelle et téléchargeable en PNG.
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { api, auth, fileUrl } from '../api'
 import { date } from '../format'
 import { logoUrl } from '../theme'
 import { toast } from '../toast'
 import Icon from '../components/Icon.vue'
+import { recevoirCollage, lireImage, collageDisponible, raccourciColler } from '../clipboard'
 
 const props = defineProps({ id: { type: String, default: '' } })
 const c = ref(null)
 const error = ref('')
 const busy = ref(false)
 const input = ref(null)
+const zonePhoto = ref(null)
 
 async function load() {
   error.value = ''
@@ -38,6 +40,9 @@ async function envoyer(file) {
     toast('Photo mise à jour')
   } catch (e) { toast(e.errors?.photo || e.message, 'error') } finally { busy.value = false; if (input.value) input.value.value = '' }
 }
+const collage = recevoirCollage(() => (peutModifier.value && !busy.value ? zonePhoto.value : null), envoyer)
+onBeforeUnmount(collage.retirer)
+async function coller() { try { await envoyer(await lireImage()) } catch (e) { toast(e.message, 'error') } }
 async function retirer() {
   busy.value = true
   try {
@@ -153,11 +158,12 @@ const imprimer = () => window.print()
         </article>
       </div>
 
-      <section v-if="peutModifier" class="card card-pad photo-zone">
-        <div><h2>Photo</h2><p class="muted">Portrait de face, cadré sur le visage — JPG, PNG ou WEBP, 5 Mo maximum. Elle apparaît aussi sur l'avatar de la barre du haut.</p></div>
+      <section v-if="peutModifier" ref="zonePhoto" class="card card-pad photo-zone">
+        <div><h2>Photo</h2><p class="muted">Portrait de face, cadré sur le visage — JPG, PNG ou WEBP, 5 Mo maximum. Vous pouvez aussi coller une image ({{ raccourciColler }}). Elle apparaît aussi sur l'avatar de la barre du haut.</p></div>
         <div class="row-actions">
           <input ref="input" type="file" class="sr-only" accept=".jpg,.jpeg,.png,.webp" @change="envoyer($event.target.files[0])" />
           <button class="btn primary" :disabled="busy" @click="input.click()"><Icon name="upload" :size="16" /> {{ c.photo ? 'Changer la photo' : 'Ajouter une photo' }}</button>
+          <button v-if="collageDisponible" class="btn" :disabled="busy" @click="coller"><Icon name="clipboard" :size="16" /> Coller l'image</button>
           <button v-if="c.photo" class="btn" :disabled="busy" @click="retirer"><Icon name="trash" :size="16" /> Retirer</button>
         </div>
       </section>
