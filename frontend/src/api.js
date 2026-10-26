@@ -15,7 +15,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function request(method, route, { params = {}, body = null, silent401 = false } = {}) {
+export async function request(method, route, { params = {}, body = null, silent401 = false, timeout = 0 } = {}) {
   const qs = new URLSearchParams({ r: route })
   for (const [k, v] of Object.entries(params)) if (v !== '' && v != null) qs.set(k, v)
 
@@ -26,11 +26,13 @@ export async function request(method, route, { params = {}, body = null, silent4
   else if (body) { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body) }
 
   let res
+  const arret = timeout ? new AbortController() : null
+  const minuteur = arret ? setTimeout(() => arret.abort(), timeout) : null
   try {
-    res = await fetch(`${BASE}?${qs}`, { method, headers, body: payload, credentials: 'same-origin' })
+    res = await fetch(`${BASE}?${qs}`, { method, headers, body: payload, credentials: 'same-origin', signal: arret?.signal })
   } catch {
     throw new ApiError(0, 'Serveur injoignable. Vérifiez votre connexion.')
-  }
+  } finally { clearTimeout(minuteur) }
   const data = await res.json().catch(() => null)
   if (!res.ok) {
     if (res.status === 401 && !silent401) { auth.user = null; if (data?.code === 'inactivite') auth.notice = data.error }
@@ -65,8 +67,10 @@ export async function login(email, password) {
   auth.notice = ''
 }
 
+// La fermeture côté serveur se fait « au mieux » : une session déjà expirée (401), un jeton périmé ou un réseau coupé
+// ne doivent jamais bloquer la déconnexion à l'écran.
 export async function logout() {
-  try { await request('POST', 'auth/logout') } finally { auth.user = null }
+  try { await request('POST', 'auth/logout', { silent401: true, timeout: 6000 }) } catch { /* déjà fermée ou serveur injoignable */ } finally { auth.user = null }
 }
 
 export const catalogueImageUrl = (name, dossier = 'produits') => `${BASE}?r=catalogue-image&d=${dossier}&f=${encodeURIComponent(name)}`   // photo publique (catalogue numérique)

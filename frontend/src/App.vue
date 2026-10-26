@@ -82,15 +82,25 @@ const closePop = (e) => { if (!e.target.closest('.anchor')) popup.value = '' }
 onMounted(() => document.addEventListener('mousedown', closePop))
 onBeforeUnmount(() => document.removeEventListener('mousedown', closePop))
 
+let enCours = false
 async function doLogout() {
+  if (enCours) return                            // double clic : une seule déconnexion
+  enCours = true
   const debut = Date.now()
-  showSplash('aurevoir', prenomDe(auth.user), auth.user.photo ? fileUrl('utilisateurs', auth.user.photo) : '')   // « À bientôt » recouvre l'écran pendant la fermeture de la session
+  showSplash('aurevoir', prenomDe(auth.user), auth.user?.photo ? fileUrl('utilisateurs', auth.user.photo) : '')   // « À bientôt » recouvre l'écran pendant la fermeture de la session
   popup.value = ''; menuOpen.value = false
-  await logout()
-  await pause(1800 - (Date.now() - debut))
-  await router.replace('/login')
-  await pause(250)                               // laisse la page de connexion se poser avant de retirer l'écran
-  hideSplash()
+  try {
+    await logout()
+    await pause(1800 - (Date.now() - debut))
+    await router.replace('/login')
+    await pause(250)                             // laisse la page de connexion se poser avant de retirer l'écran
+  } finally {
+    // Quoi qu'il arrive, on retrouve la page de connexion : l'écran d'au revoir ne doit jamais rester bloqué
+    auth.user = null
+    if (router.currentRoute.value.path !== '/login') await router.replace('/login').catch(() => {})
+    hideSplash()
+    enCours = false
+  }
 }
 provide('deconnecter', doLogout)
 </script>

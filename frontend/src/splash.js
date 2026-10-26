@@ -11,8 +11,9 @@ const reduit = () => typeof matchMedia === 'function' && matchMedia('(prefers-re
 export function showSplash(mode, nom = '', photo = '') {
   clearTimeout(minuteur)
   splash.mode = mode; splash.nom = nom; splash.photo = photo; splash.cycle++; splash.visible = true
-  // Bienvenue : se referme toute seule. Au revoir : refermé par l'appelant une fois la page de connexion prête.
+  // Bienvenue : se referme toute seule. Au revoir : refermé par l'appelant une fois la page de connexion prête (au plus tard après 10 s).
   if (mode === 'bienvenue') minuteur = setTimeout(hideSplash, reduit() ? 500 : DUREES.bienvenue)
+  else minuteur = setTimeout(() => { hideSplash(); if (!location.hash.startsWith('#/login')) location.hash = '#/login' }, 10000)   // filet de sécurité
 }
 export function hideSplash() { clearTimeout(minuteur); splash.visible = false }
 export const pause = (ms) => new Promise((r) => setTimeout(r, reduit() ? Math.min(ms, 300) : ms))
