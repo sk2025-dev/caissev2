@@ -11,7 +11,13 @@ function produit_detail(PDO $db, array $user, $id, array $resources)
     $mv = mouvements_liste($db, ['idprod' => $id, 'per_page' => 15]);
     // Jours de stock restant au rythme des 30 derniers jours
     $rythme = $ventes30['qte'] / 30;
-    return ['produit' => $p, 'ventes_30j' => $ventes30, 'mouvements' => $mv['data'], 'jours_restants' => ($p['stockable'] && $rythme > 0) ? (int)floor($p['stock_qty'] / $rythme) : null];
+    try {
+        $photos = galerie_liste($db, $id);
+        $avis = (new Crud($db, 'avis', $resources['avis'], $user))->listing(['idprod' => $id, 'per_page' => 20]);
+    } catch (PDOException $e) { $photos = []; $avis = ['data' => [], 'meta' => ['total' => 0]]; }   // migration 011 non appliquée
+    return ['produit' => $p, 'ventes_30j' => $ventes30, 'mouvements' => $mv['data'], 'jours_restants' => ($p['stockable'] && $rythme > 0) ? (int)floor($p['stock_qty'] / $rythme) : null,
+        'photos' => $photos, 'avis' => $avis['data'], 'avis_total' => $avis['meta']['total'], 'avis_synthese' => avis_synthese($db, $id), 'avis_sources' => AVIS_SOURCES,
+        'galerie_max' => GALERIE_MAX];
 }
 
 function client_detail(PDO $db, array $user, $id, array $resources)

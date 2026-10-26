@@ -58,6 +58,7 @@ const nav = computed(() => [
   { to: '/appros', label: 'Approvisionnements', icon: 'truck', droit: 'achats' },
   { sep: 'Tiers' },
   { to: '/clients', label: 'Clients', icon: 'user' },
+  { to: '/avis', label: 'Avis clients', icon: 'star', droit: 'catalogue_ecriture' },
   { to: '/fournisseurs', label: 'Fournisseurs', icon: 'briefcase', droit: 'fournisseurs' },
   ...(auth.user?.admin ? [{ sep: 'Administration' }, { to: '/caisses', label: 'Caisses', icon: 'wallet' }, { to: '/zones-livraison', label: 'Tarifs de livraison', icon: 'truck' }, { to: '/utilisateurs', label: 'Utilisateurs', icon: 'users' }, { to: '/journal', label: "Journal d'activité", icon: 'history' }] : []),
   ...(auth.user?.super ? [{ to: '/configuration', label: 'Configuration', icon: 'settings' }] : []),

@@ -3,7 +3,7 @@ import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, auth, ApiError } from '../api'
 import { resources } from '../resources'
-import { loadLookups } from '../lookups'
+import { loadLookups, lookups } from '../lookups'
 import { toast } from '../toast'
 import Icon from '../components/Icon.vue'
 import SearchSelect from '../components/SearchSelect.vue'
@@ -22,7 +22,8 @@ const route = useRoute()
 const anciens = ref(false)
 const query = reactive({ q: typeof route.query.q === 'string' ? route.query.q : '', sort: '', dir: 'desc', page: 1, from: '', to: '' })
 const filtres = reactive({})
-for (const f of config.filters || []) filtres[f.key] = f.default ?? ''
+// Un filtre peut venir de l'adresse (ex. /avis?idprod=12 depuis la fiche produit)
+for (const f of config.filters || []) filtres[f.key] = typeof route.query[f.key] === 'string' ? route.query[f.key] : f.default ?? ''
 const editing = ref(undefined) // undefined = fermé, null = création, objet = édition
 const toDelete = ref(null)
 const deleting = ref(false)
@@ -113,7 +114,7 @@ const to = computed(() => Math.min(meta.total, meta.page * meta.per_page))
           <input v-model="query.q" class="input" type="search" :placeholder="config.searchPlaceholder" :aria-label="config.searchPlaceholder" />
         </div>
         <label v-if="config.softStatus" class="check"><input v-model="anciens" type="checkbox" /><span>Afficher les anciens</span></label>
-        <SearchSelect v-for="f in config.filters || []" :key="f.key" v-model="filtres[f.key]" class="filter" :label="f.label" :options="f.options" />
+        <SearchSelect v-for="f in config.filters || []" :key="f.key" v-model="filtres[f.key]" class="filter" :label="f.label" :options="typeof f.options === 'function' ? f.options(lookups) : f.options" />
         <template v-if="config.dateFilter">
           <input v-model="query.from" class="input date" type="date" aria-label="Du" />
           <input v-model="query.to" class="input date" type="date" aria-label="Au" />

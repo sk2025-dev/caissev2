@@ -87,7 +87,7 @@ async function submit() {
 
 const first = ref(null)
 onMounted(() => first.value?.querySelector('input,select,textarea')?.focus())
-const title = computed(() => (editing.value ? `Modifier ${props.config.singular}` : `${props.config.feminine ? 'Nouvelle' : 'Nouveau'} ${props.config.singular}`))
+const title = computed(() => (editing.value ? `Modifier ${props.config.singular}` : `${props.config.feminine ? 'Nouvelle' : /^[aeiouéh]/i.test(props.config.singular) ? 'Nouvel' : 'Nouveau'} ${props.config.singular}`))
 </script>
 
 <template>

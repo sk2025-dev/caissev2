@@ -13,7 +13,7 @@ export const ACTIONS = {
   ouverture: 'Ouverture de caisse', cloture: 'Clôture de caisse', cloture_forcee: 'Clôture forcée', entree: "Entrée d'espèces", sortie: "Sortie d'espèces", depense: 'Dépense',
   vente: 'Vente', annulation: 'Annulation', statut: 'Suivi de commande', livraison: 'Remise de commande',
   ajustement: 'Ajustement de stock', perte: 'Perte', inventaire: 'Inventaire', reception: 'Réception', reglement: 'Règlement',
-  export: 'Export', sauvegarde: 'Sauvegarde', envoi: 'Envoi des alertes',
+  export: 'Export', sauvegarde: 'Sauvegarde', envoi: 'Envoi des alertes', photo: 'Photos',
 }
 
 const SENSIBLES = ['connexion_echec', 'connexion_bloquee', 'delete', 'annulation', 'cloture_forcee', 'perte']

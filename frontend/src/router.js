@@ -20,6 +20,7 @@ const routes = [
   page('fournisseurs', 'Fournisseurs', { droit: 'fournisseurs' }),
   { path: '/clients/:id(\\d+)', component: () => import('./views/ClientDetail.vue'), props: true, meta: { title: 'Fiche client' } },
   page('clients', 'Clients'),
+  page('avis', 'Avis clients', { droit: 'catalogue_ecriture' }),
   { path: '/carte/:id(\\d+)?', component: () => import('./views/CarteVirtuelle.vue'), props: true, meta: { title: 'Carte virtuelle' } },
   page('caisses', 'Caisses', { admin: true }),
   page('zones-livraison', 'Tarifs de livraison', { admin: true }),

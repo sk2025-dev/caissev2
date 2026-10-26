@@ -20,55 +20,57 @@ class Crud
 
     /* ---------- Lecture ---------- */
 
-    public function listing()
+    /** Liste paginée ; $q remplace les paramètres de la requête (appel interne, ex. avis d'une fiche produit). */
+    public function listing(?array $q = null)
     {
+        $get = $q ?? $_GET;
         $c = $this->cfg;
         $where = [$c['where'] ?? '1=1'];
         if (!empty($c['scope'])) $where[] = $c['scope']($this->user);   // ex. un administrateur ne voit pas les super administrateurs
         $params = [];
 
-        if (isset($_GET['q']) && trim($_GET['q']) !== '' && !empty($c['search'])) {
+        if (isset($get['q']) && trim($get['q']) !== '' && !empty($c['search'])) {
             $likes = [];
             foreach ($c['search'] as $i => $col) {
                 $likes[] = "$col LIKE :q$i";
-                $params["q$i"] = '%' . str_replace(['%', '_'], ['\\%', '\\_'], trim($_GET['q'])) . '%';
+                $params["q$i"] = '%' . str_replace(['%', '_'], ['\\%', '\\_'], trim($get['q'])) . '%';
             }
             $where[] = '(' . implode(' OR ', $likes) . ')';
         }
         // Ressources avec départ (chauffeurs, propriétaires) : par défaut seulement les personnes en poste ; ?statut=parti | tous
         if (!empty($c['soft_status'])) {
-            $mode = isset($_GET['statut']) ? $_GET['statut'] : 'actifs';
+            $mode = isset($get['statut']) ? $get['statut'] : 'actifs';
             if ($mode === 'parti') $where[] = "{$c['soft_status']} IS NOT NULL";
             elseif ($mode !== 'tous') $where[] = "{$c['soft_status']} IS NULL";
         }
         foreach (($c['custom_filters'] ?? []) as $param => $fn) {   // filtres calculés (ex. état du stock) : le callback renvoie un fragment SQL sûr ou null
-            if (isset($_GET[$param]) && $_GET[$param] !== '' && ($frag = $fn((string)$_GET[$param])) !== null) $where[] = $frag;
+            if (isset($get[$param]) && $get[$param] !== '' && ($frag = $fn((string)$get[$param])) !== null) $where[] = $frag;
         }
         foreach (($c['filters'] ?? []) as $param => $col) {
-            if (isset($_GET[$param]) && $_GET[$param] !== '') {
+            if (isset($get[$param]) && $get[$param] !== '') {
                 $where[] = "$col = :f_$param";
-                $params["f_$param"] = $_GET[$param];
+                $params["f_$param"] = $get[$param];
             }
         }
         if (!empty($c['date_col'])) {
             foreach (['from' => '>=', 'to' => '<='] as $p => $op) {
-                if (!empty($_GET[$p]) && $this->validDate($_GET[$p])) {
+                if (!empty($get[$p]) && $this->validDate($get[$p])) {
                     $where[] = "{$c['date_col']} $op :d_$p";
-                    $params["d_$p"] = $_GET[$p];
+                    $params["d_$p"] = $get[$p];
                 }
             }
         }
         $whereSql = implode(' AND ', $where);
 
         $order = $c['default_sort'];
-        if (isset($_GET['sort'], $c['sort'][$_GET['sort']])) {
-            $dir = (isset($_GET['dir']) && strtolower($_GET['dir']) === 'asc') ? 'ASC' : 'DESC';
-            $order = $c['sort'][$_GET['sort']] . ' ' . $dir . ', ' . $c['default_sort'];
+        if (isset($get['sort'], $c['sort'][$get['sort']])) {
+            $dir = (isset($get['dir']) && strtolower($get['dir']) === 'asc') ? 'ASC' : 'DESC';
+            $order = $c['sort'][$get['sort']] . ' ' . $dir . ', ' . $c['default_sort'];
         }
 
-        $all = !empty($_GET['all']);
-        $perPage = $all ? 1000 : query_int('per_page', 25, 1, 100);
-        $page = $all ? 1 : query_int('page', 1, 1);
+        $all = !empty($get['all']);
+        $perPage = $all ? 1000 : max(1, min(100, (int)($get['per_page'] ?? 25)));
+        $page = $all ? 1 : max(1, (int)($get['page'] ?? 1));
         $offset = ($page - 1) * $perPage;
 
         $st = $this->db->prepare("SELECT COUNT(*) FROM {$c['from']} WHERE $whereSql");

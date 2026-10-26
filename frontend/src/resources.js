@@ -1,6 +1,25 @@
 // Configuration déclarative des écrans CRUD : colonnes du tableau et champs du formulaire.
 import { money, qty, uniteAccord } from './format'
 import { fileUrl } from './api'
+import { SOURCES, sourceOptions, noteOptions, etoiles } from './avis'
+
+// Champs du formulaire d'avis ; fixerProduit : avis saisi depuis une fiche produit (le produit est imposé)
+export function avisChamps(fixerProduit = null) {
+  return [
+    fixerProduit
+      ? { name: 'idprod', label: 'Produit', type: 'text', default: () => fixerProduit, showIf: () => false }
+      : { name: 'idprod', label: 'Produit concerné', type: 'select', full: true, options: (l) => [{ value: '', label: 'La boutique en général' }, ...(l.produits || []).map((p) => ({ value: p.id, label: p.nom }))] },
+    { name: 'source', label: 'Reçu sur', type: 'select', required: true, default: () => 'facebook', options: sourceOptions },
+    { name: 'note', label: 'Note', type: 'select', required: true, default: () => 5, options: noteOptions },
+    { name: 'auteur', label: 'Nom du client', type: 'text' },
+    { name: 'telephone', label: 'Téléphone (avis par SMS / WhatsApp)', type: 'phone' },
+    { name: 'date_avis', label: "Date de l'avis", type: 'date', default: () => new Date().toISOString().slice(0, 10) },
+    { name: 'commentaire', label: 'Commentaire du client', type: 'textarea', full: true },
+    { name: 'lien', label: "Lien vers l'avis (Facebook, Google, TikTok…)", type: 'url', full: true },
+    { name: 'capture', label: "Capture d'écran (preuve)", type: 'file', dir: 'avis', accept: '.jpg,.jpeg,.png,.webp', full: true },
+    { name: 'reponse', label: 'Notre réponse', type: 'textarea', full: true },
+  ]
+}
 
 const oui = [{ value: 1, label: 'Oui' }, { value: 0, label: 'Non' }]
 const catalogue = (u) => !!u?.droits?.catalogue_ecriture
@@ -42,8 +61,36 @@ export const resources = {
       { name: 'seuil_alerte', label: 'Seuil d\'alerte', type: 'number', step: '0.001', showIf: (f) => f.type !== 'service' },
       { name: 'actif', label: 'Vendu en caisse', type: 'select', default: () => 1, options: () => oui },
       { name: 'description', label: 'Description', type: 'textarea', full: true },
-      { name: 'image', label: 'Image', type: 'file', dir: 'produits', accept: '.jpg,.jpeg,.png,.webp', full: true },
+      { name: 'marque', label: 'Marque', type: 'text' },
+      { name: 'modele', label: 'Modèle / gamme', type: 'text' },
+      { name: 'origine', label: 'Origine (pays de fabrication)', type: 'text' },
+      { name: 'couleur', label: 'Couleur', type: 'text', showIf: (f) => f.type !== 'service' },
+      { name: 'dimensions', label: 'Dimensions / taille', type: 'text', showIf: (f) => f.type !== 'service' },
+      { name: 'poids', label: 'Poids / contenance', type: 'text', showIf: (f) => f.type !== 'service' },
+      { name: 'garantie', label: 'Garantie', type: 'text' },
+      { name: 'caracteristiques', label: 'Caractéristiques', type: 'textarea', full: true, hint: () => 'Une par ligne, sous la forme « Nom : valeur » (ex. Matière : coton). Affichées en tableau sur la fiche.' },
+      { name: 'image', label: 'Photo principale', type: 'file', dir: 'produits', accept: '.jpg,.jpeg,.png,.webp', full: true, editHint: 'Les autres photos se gèrent dans la galerie de la fiche produit.' },
     ],
+  },
+
+  avis: {
+    pk: 'idavis', needsLookups: true, write: catalogue, feminine: false,
+    title: 'Avis clients', singular: 'avis', subtitle: 'Avis reçus sur Facebook, Google, TikTok, Instagram, WhatsApp, par SMS ou en magasin',
+    searchPlaceholder: 'Client, commentaire, produit…',
+    filters: [
+      { key: 'idprod', label: 'Produit', options: (l) => [{ value: '', label: 'Tous les produits' }, ...(l.produits || []).map((p) => ({ value: String(p.id), label: p.nom }))] },
+      { key: 'source', label: 'Source', options: [{ value: '', label: 'Toutes les sources' }, ...sourceOptions()] },
+      { key: 'note', label: 'Note', options: [{ value: '', label: 'Toutes les notes' }, ...[5, 4, 3, 2, 1].map((n) => ({ value: n, label: `${n} étoile${n > 1 ? 's' : ''}` }))] },
+    ],
+    columns: [
+      { key: 'date_avis', label: 'Date', sort: 'date_avis', format: (r) => (r.date_avis ? new Date(r.date_avis).toLocaleDateString('fr-FR') : '—') },
+      { key: 'source', label: 'Source', sort: 'source', badge: (r) => ({ text: SOURCES[r.source]?.label || r.source, cls: 'primary' }) },
+      { key: 'note', label: 'Note', sort: 'note', badge: (r) => ({ text: etoiles(r.note), cls: r.note >= 4 ? 'success' : r.note === 3 ? 'warning' : 'danger' }) },
+      { key: 'auteur', label: 'Client', sort: 'auteur', cls: 'strong', format: (r) => r.auteur || 'Anonyme' },
+      { key: 'produit', label: 'Produit', sort: 'produit', format: (r) => r.produit || 'La boutique' },
+      { key: 'commentaire', label: 'Commentaire', format: (r) => (r.commentaire || '').length > 90 ? r.commentaire.slice(0, 90) + '…' : r.commentaire || '—' },
+    ],
+    fields: avisChamps(),
   },
 
   categories: {

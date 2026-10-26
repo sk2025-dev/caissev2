@@ -13,13 +13,13 @@ const JOURNAL_MODULES = [
     'clients' => 'clients',
     'ventes' => 'ventes', 'commandes' => 'commandes',
     'sessions_caisse' => 'caisse', 'caisse_operations' => 'caisse', 'categories_mouvement' => 'caisse', 'caisses' => 'caisse',
-    'zones-livraison' => 'commandes', 'exports' => 'exports',
+    'zones-livraison' => 'commandes', 'exports' => 'exports', 'avis' => 'clients',
 ];
 
 /** Nom des entités du CRUD dans les résumés (« Produit « Riz 5 kg » modifié »). */
 const JOURNAL_ENTITES = [
     'produits' => 'Produit', 'categories' => 'Catégorie', 'clients' => 'Client', 'fournisseurs' => 'Fournisseur',
-    'caisses' => 'Caisse', 'zones-livraison' => 'Tarif de livraison', 'utilisateurs' => 'Utilisateur',
+    'caisses' => 'Caisse', 'zones-livraison' => 'Tarif de livraison', 'utilisateurs' => 'Utilisateur', 'avis' => 'Avis',
 ];
 
 /** Champs jamais recopiés en clair dans le journal. */
@@ -71,7 +71,7 @@ function journal_diff(array $avant, array $apres, array $ignorer = [])
 function journal_libelle(array $row)
 {
     if (!empty($row['nomag'])) return trim($row['nomag'] . ' ' . ($row['prenom'] ?? ''));
-    foreach (['nom', 'numero', 'libelle', 'emailag'] as $k) if (!empty($row[$k])) return (string)$row[$k];
+    foreach (['nom', 'numero', 'libelle', 'auteur', 'emailag'] as $k) if (!empty($row[$k])) return (string)$row[$k];
     return '';
 }
 

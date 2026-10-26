@@ -91,7 +91,15 @@ return [
             'stockable' => ['type' => 'enum', 'values' => [0, 1]],
             'seuil_alerte' => ['type' => 'number'],
             'actif' => ['type' => 'enum', 'values' => [0, 1]],
-            'description' => ['type' => 'string', 'max' => 500],
+            'description' => ['type' => 'string', 'max' => 5000],
+            'marque' => ['type' => 'string', 'max' => 80],
+            'modele' => ['type' => 'string', 'max' => 80],
+            'origine' => ['type' => 'string', 'max' => 80],
+            'couleur' => ['type' => 'string', 'max' => 60],
+            'dimensions' => ['type' => 'string', 'max' => 80],
+            'poids' => ['type' => 'string', 'max' => 40],
+            'garantie' => ['type' => 'string', 'max' => 80],
+            'caracteristiques' => ['type' => 'string', 'max' => 5000],   // une caractéristique par ligne : « Nom : valeur »
             'image' => ['type' => 'file', 'dir' => 'produits', 'allow' => ['jpg', 'jpeg', 'png', 'webp']],
             'stock_initial' => ['type' => 'number', 'virtuel' => true],   // enregistré comme premier mouvement de stock
         ],
@@ -108,12 +116,41 @@ return [
             return $d;
         },
         'after_save' => function (PDO $db, $row, array $virtuel, $user, $creation) {
+            galerie_ajouter_principale($db, $row, $user);   // la photo choisie dans le formulaire entre en tête de la galerie
             if (!$creation) return;
             if ($row['sku'] === '') $db->prepare('UPDATE produits SET sku = ? WHERE idprod = ?')->execute([sprintf('P%06d', $row['idprod']), $row['idprod']]);
             $q = isset($virtuel['stock_initial']) ? (float)$virtuel['stock_initial'] : 0;
             if ($q > 0 && (int)$row['stockable']) stock_transaction($db, function () use ($db, $user, $row, $q) {
                 stock_bouger($db, $user['id'], produit_verrouille($db, $row['idprod']), 'initial', $q, ['motif' => 'Stock initial', 'ref_type' => 'produit', 'ref_id' => $row['idprod']]);
             });
+        },
+    ],
+
+    'avis' => [
+        'table' => 'avis', 'pk' => 'idavis', 'pk_col' => 'a.idavis',
+        'select' => 'a.*, p.nom AS produit',
+        'from' => 'avis a LEFT JOIN produits p ON p.idprod = a.idprod', 'where' => 'a.supp = 0',
+        'search' => ['a.auteur', 'a.commentaire', 'a.telephone', 'p.nom'],
+        'filters' => ['idprod' => 'a.idprod', 'source' => 'a.source', 'note' => 'a.note'],
+        'sort' => ['date_avis' => 'a.date_avis', 'note' => 'a.note', 'auteur' => 'a.auteur', 'produit' => 'p.nom', 'source' => 'a.source'],
+        'default_sort' => 'a.date_avis DESC, a.idavis DESC',
+        'audit' => $audit, 'on_create' => ['supp' => 0], 'soft_delete' => ['supp' => 1], 'roles_ecriture' => $gestion,
+        'fields' => [
+            'idprod' => ['type' => 'ref', 'table' => 'produits', 'pk' => 'idprod', 'where' => 'supp = 0'],
+            'source' => ['type' => 'enum', 'values' => array_keys(AVIS_SOURCES), 'required' => true],
+            'note' => ['type' => 'enum', 'values' => [1, 2, 3, 4, 5], 'required' => true],
+            'auteur' => ['type' => 'string', 'max' => 120],
+            'telephone' => ['type' => 'phone'],
+            'date_avis' => ['type' => 'date'],
+            'commentaire' => ['type' => 'string', 'max' => 5000],
+            'lien' => ['type' => 'string', 'max' => 300],
+            'capture' => ['type' => 'file', 'dir' => 'avis', 'allow' => ['jpg', 'jpeg', 'png', 'webp']],
+            'reponse' => ['type' => 'string', 'max' => 5000],
+        ],
+        'before_save' => function (PDO $db, array $d, $existing, $user) {
+            if (isset($d['lien']) && $d['lien'] !== '' && !preg_match('~^https?://[^\s]+$~i', $d['lien'])) throw new ApiError(422, 'Données invalides', ['lien' => 'Adresse web invalide (elle doit commencer par https://)']);
+            if (!$existing && empty($d['date_avis'])) $d['date_avis'] = gmdate('Y-m-d');
+            return $d;
         },
     ],
 

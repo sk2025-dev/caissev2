@@ -6,6 +6,7 @@
  *   commandes : commandes · commande · commande-creer · commande-statut · commande-livrer · commande-annuler
  *   stock : stock-ajuster · inventaire · inventaires · mouvements-stock · stock-balance    achats : appro-creer · appros · appro · reglement-creer · reglements
  *   fiches : produit-detail · client-detail · fournisseur-detail    traçabilité : journal
+ *   produits : produit-photos (envoi multiple) · produit-photo (principale, légende, ordre, retouche, suppression) · avis-synthese
  *   ressources CRUD : produits · categories · clients · fournisseurs · caisses · utilisateurs
  */
 require_once __DIR__ . '/../connexion/security.php';
@@ -28,6 +29,8 @@ require_once __DIR__ . '/lib/config.php';
 require_once __DIR__ . '/lib/alertes_mail.php';
 require_once __DIR__ . '/lib/fiches.php';
 require_once __DIR__ . '/lib/utilisateurs.php';
+require_once __DIR__ . '/lib/galerie.php';
+require_once __DIR__ . '/lib/avis.php';
 
 // Le flux d'erreurs PHP ne doit jamais polluer le JSON
 ini_set('display_errors', '0');
@@ -126,6 +129,7 @@ switch ($r) {
             'sources_depense' => role_peut($user['role'], 'depenses.gerer') ? mouvements_sources() : [],
             'zones_livraison' => role_peut($user['role'], 'commandes.lire') ? $t('SELECT idzone AS id, zone, commune, nom, prix, delai FROM zones_livraison WHERE supp = 0 AND actif = 1 ORDER BY zone, commune, nom') : [],
             'caisses' => $t('SELECT idcaisse AS id, nom FROM caisses WHERE supp = 0 AND actif = 1 ORDER BY idcaisse'),
+            'produits' => role_peut($user['role'], 'catalogue.ecrire') ? $t('SELECT idprod AS id, nom FROM produits WHERE supp = 0 ORDER BY nom') : [],   // choix du produit d'un avis
             'caissiers' => role_peut($user['role'], 'ventes.lire_toutes') ? $t("SELECT id_user AS id, CONCAT(nomag, ' ', prenom) AS nom FROM users WHERE user_status = 1 ORDER BY nomag") : [],
             'groupes' => is_admin_role($user['role']) ? $t('SELECT idgpe AS id, coden AS nom FROM table_gpe_users' . (is_super_role($user['role']) ? '' : " WHERE coden <> 'superadmin'") . ' ORDER BY coden') : [],
             'reglages' => ['tva_defaut' => (float)$reglages['caisse.tva_defaut'], 'prix_libre' => $reglages['caisse.prix_libre'] === '1', 'remise_max' => (float)$reglages['caisse.remise_max'], 'stock_negatif' => $reglages['caisse.stock_negatif'] === '1'],
@@ -263,6 +267,9 @@ switch ($r) {
 
     /* ---- Fiches détaillées ---- */
     case 'produit-detail': json_out(produit_detail($bdd, $user, $id, $resources));
+    case 'produit-photos': $post(); json_out(galerie_televerser($bdd, $user, $id, $_FILES), 201);
+    case 'produit-photo': $post(); json_out(galerie_action($bdd, $user, $corps, $_FILES));
+    case 'avis-synthese': json_out(['synthese' => avis_synthese($bdd), 'sources' => AVIS_SOURCES]);
     case 'client-detail': json_out(client_detail($bdd, $user, $id, $resources));
     case 'fournisseur-detail': exiger($user, 'fournisseurs.lire'); json_out(fournisseur_detail($bdd, $user, $id, $resources));
 
@@ -296,7 +303,7 @@ switch ($r) {
     /* ---- Images des produits (réservées aux utilisateurs connectés) ---- */
     case 'fichier':
         $dir = isset($q['d']) ? $q['d'] : ''; $nom = isset($q['f']) ? basename($q['f']) : '';
-        if (!in_array($dir, ['produits', 'utilisateurs', 'categories'], true) || $nom === '') throw new ApiError(404, 'Fichier introuvable');
+        if (!in_array($dir, ['produits', 'utilisateurs', 'categories', 'avis'], true) || $nom === '') throw new ApiError(404, 'Fichier introuvable');
         $chemin = dirname(__DIR__) . '/doc/' . $dir . '/' . $nom;
         if (!is_file($chemin)) throw new ApiError(404, 'Fichier introuvable');
         $types = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'webp' => 'image/webp'];

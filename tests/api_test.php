@@ -645,8 +645,35 @@ check('restauration dans une base vierge : mêmes effectifs et même chiffre d\'
 $admin->exec("DROP DATABASE IF EXISTS `{$name}_restore_test`");
 array_map('unlink', glob(__DIR__ . '/../exports/*.{xlsx,csv,pdf,gz}', GLOB_BRACE));
 
-echo "Journal d'activité (traçabilité)\n";
+echo "Fiche produit : galerie de photos et avis clients\n";
 $jr = function ($sql) use ($pdo) { return $pdo->query("SELECT * FROM audit_log WHERE $sql ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC); };
+$png = tempnam(sys_get_temp_dir(), 'img') . '.png'; file_put_contents($png, base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='));
+$deux = ['photos[0]' => new CURLFile($png, 'image/png', 'face.png'), 'photos[1]' => new CURLFile($png, 'image/png', 'dos.png')];
+list($c) = $k->call('POST', 'produit-photos', ['id' => $riz], $deux, true); check('galerie : ajout de photos refusé au caissier', $c === 403);
+list($c, $j) = $m->call('POST', 'produit-photos', ['id' => $riz], $deux, true);
+check('galerie : 2 photos en un envoi, la première devient principale', $c === 201 && count($j['photos']) === 2 && $j['image'] === $j['photos'][0]['fichier'], json_encode($j));
+$ph = $j['photos'] ?? [[], []];
+list($c, $j) = $m->call('POST', 'produit-photo', [], ['idphoto' => $ph[1]['idphoto'], 'action' => 'principale']);
+check('galerie : changement de photo principale (en tête, utilisée en caisse)', $c === 200 && $j['image'] === $ph[1]['fichier'] && $j['photos'][0]['idphoto'] === $ph[1]['idphoto'] && $pdo->query("SELECT image FROM produits WHERE idprod = $riz")->fetchColumn() === $ph[1]['fichier']);
+list($c, $j) = $m->call('POST', 'produit-photo', [], ['idphoto' => $ph[0]['idphoto'], 'action' => 'legende', 'legende' => 'Vue de face']); check('galerie : légende', $c === 200 && $j['photos'][1]['legende'] === 'Vue de face');
+list($c, $j) = $m->call('POST', 'produit-photo', [], ['idphoto' => $ph[1]['idphoto'], 'action' => 'supprimer']);
+check('galerie : suppression de la principale, la suivante prend le relais', $c === 200 && count($j['photos']) === 1 && $j['image'] === $ph[0]['fichier']);
+list($c, $j) = $m->call('POST', 'produit-photos', ['id' => $riz], array_combine(array_map(function ($i) { return "photos[$i]"; }, range(0, 11)), array_fill(0, 12, new CURLFile($png, 'image/png', 'x.png'))), true);
+check('galerie : 12 photos maximum', $c === 422 && isset($j['errors']['photos']), json_encode($j));
+@unlink($png);
+list($c, $j) = $m->call('POST', 'avis', [], ['idprod' => $riz, 'source' => 'facebook', 'note' => 5, 'auteur' => 'Awa K.', 'commentaire' => 'Riz de très bonne qualité', 'lien' => 'https://facebook.com/x/posts/1']);
+check('avis Facebook enregistré (date du jour par défaut)', $c === 201 && $j['data']['date_avis'] === $today && $j['data']['produit'] === 'Riz 5 kg', json_encode($j));
+list($c) = $m->call('POST', 'avis', [], ['idprod' => $riz, 'source' => 'sms', 'note' => 2, 'telephone' => '+225 07 12 34 56 78', 'commentaire' => 'Sac abîmé']); check('avis par SMS enregistré', $c === 201);
+list($c, $j) = $m->call('POST', 'avis', [], ['source' => 'google', 'note' => 4, 'lien' => 'javascript:alert(1)']); check('avis : lien non web refusé', $c === 422 && isset($j['errors']['lien']));
+list($c, $j) = $m->call('POST', 'avis', [], ['source' => 'myspace', 'note' => 9]); check('avis : source et note contrôlées', $c === 422 && isset($j['errors']['source'], $j['errors']['note']));
+list($c) = $k->call('POST', 'avis', [], ['source' => 'google', 'note' => 5]); check('avis : saisie refusée au caissier', $c === 403);
+list($c, $j) = $a->call('GET', 'produit-detail', ['id' => $riz]);
+check('fiche produit : photos, avis, note moyenne et sources', $c === 200 && count($j['photos']) === 1 && $j['avis_total'] === 2 && $j['avis_synthese']['moyenne'] == 3.5 && count($j['avis_synthese']['sources']) === 2 && $j['avis_synthese']['etoiles'][5] === 1, json_encode($j['avis_synthese'] ?? $j));
+list($c, $j) = $m->call('POST', 'produits', ['id' => $riz], ['marque' => 'Uncle Ben', 'origine' => 'Thaïlande', 'caracteristiques' => "Grain : long\nCuisson : 12 min"]);
+check('fiche produit détaillée : marque, origine, caractéristiques', $c === 200 && $j['data']['marque'] === 'Uncle Ben' && strpos($j['data']['caracteristiques'], 'Cuisson') !== false);
+check('photos et avis journalisés', (bool)$jr("action = 'photo' AND entity_id = $riz") && (bool)$jr("entity = 'avis' AND action = 'create'"));
+
+echo "Journal d'activité (traçabilité)\n";
 $e = $jr("action = 'connexion_echec' AND acteur = 'admin@test.local'"); check('échec de connexion journalisé (compte visé, e-mail saisi, IP)', $e && (int)$e['entity_id'] > 0 && $e['user_id'] === null && $e['ip'] !== '', json_encode($e));
 check('connexion réussie journalisée', (bool)$jr("action = 'connexion' AND module = 'securite'"));
 $e = $jr("action = 'update' AND entity = 'produits' AND entity_id = $eau"); $d = json_decode($e['detail'] ?? '', true);
