@@ -34,7 +34,7 @@ const ligne = (l) => `${qty(l.quantite)} × ${money(l.prix_unitaire)}`
     <div class="t-meta">
       <span>{{ estCommande ? 'Commande' : 'Ticket' }} {{ doc.numero }}</span>
       <span v-if="!estCommande">{{ dateHeure(doc.date_vente) }}</span>
-      <span v-if="!estCommande">Caissier : {{ doc.caissier }}</span>
+      <span v-if="!estCommande">Caissier : {{ doc.caissier }}<template v-if="doc.caisse"> · {{ doc.caisse }}</template></span>
       <span v-if="estCommande || doc.client">Client : {{ estCommande ? doc.client_nom : doc.client }}</span>
       <template v-if="estCommande">
         <span v-if="doc.client_tel">Tél. {{ doc.client_tel }}</span>

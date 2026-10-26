@@ -28,7 +28,7 @@ export function lienFiche(e) {
   if (!e.entity_id) return null
   const id = e.entity_id
   return {
-    produits: `/produits/${id}`, stock: `/produits/${id}`, clients: `/clients/${id}`, fournisseurs: `/fournisseurs/${id}`, utilisateurs: `/carte/${id}`,
+    produits: `/produits/${id}`, stock: `/produits/${id}`, clients: `/clients/${id}`, fournisseurs: `/fournisseurs/${id}`, utilisateurs: `/carte/${id}`, caisses: `/caisses/${id}`,
   }[e.entity] || null
 }
 

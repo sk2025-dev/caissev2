@@ -82,6 +82,7 @@ async function ouvrir() {
   ouverture.busy = true; ouverture.erreurs = {}
   try {
     session.value = (await api.post('session-ouvrir', { idcaisse: ouverture.idcaisse, fond_initial: ouverture.fond || 0 })).session
+    await chargerCatalogue()   // chaque caisse a ses produits
     toast('Caisse ouverte — bonne vente !')
     await nextTick(); recherche.value?.focus()
   } catch (e) {

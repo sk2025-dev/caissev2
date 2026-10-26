@@ -30,7 +30,9 @@ function vente_creer(PDO $db, array $user, array $in, $prixFiges = false, $stock
     $admin = role_peut($user['role'], 'ventes.lire_toutes');
     $idclient = !empty($in['idclient']) ? (int)$in['idclient'] : null;
 
-    return stock_transaction($db, function () use ($db, $user, $reg, $cle, $session, $lignesIn, $remiseGlobale, $paiementsIn, $modes, $admin, $idclient, $in, $prixFiges, $stockDejaSorti) {
+    $caisse = caisse_ligne($db, $session['idcaisse']);
+
+    return stock_transaction($db, function () use ($db, $user, $reg, $cle, $session, $caisse, $lignesIn, $remiseGlobale, $paiementsIn, $modes, $admin, $idclient, $in, $prixFiges, $stockDejaSorti) {
         // 1. Produits verrouillés (ordre croissant) puis lignes recalculées depuis le catalogue
         $ids = array_unique(array_map(function ($l) { return (int)($l['idprod'] ?? 0); }, $lignesIn)); sort($ids);
         $produits = [];
@@ -41,6 +43,7 @@ function vente_creer(PDO $db, array $user, array $in, $prixFiges = false, $stock
             $p = $produits[(int)($l['idprod'] ?? 0)] ?? null;
             if (!$p) err_lignes('Produit inconnu dans le panier');
             if (!(int)$p['actif']) err_lignes($p['nom'] . ' est désactivé');
+            if (!$prixFiges && !caisse_vend($db, $caisse, $p['idprod'])) err_lignes($p['nom'] . ' n\'est pas vendu sur la caisse « ' . $caisse['nom'] . ' »');   // commande livrée : non liée à une caisse
             $q = nombre($l['quantite'] ?? '', 'lignes', 0.001, 100000);
             if ($p['type'] === 'produit' && $p['unite'] === 'pièce' && floor($q) != $q) err_lignes('Quantité entière attendue pour ' . $p['nom']);
             $pu = (float)$p['prix_vente'];
@@ -105,7 +108,7 @@ function vente_creer(PDO $db, array $user, array $in, $prixFiges = false, $stock
         }
 
         // 4. Enregistrement
-        $numero = numero_suivant($db, 'vente', $reg['caisse.prefixe']);
+        $numero = $caisse['prefixe'] !== '' ? numero_suivant($db, 'vente-' . $caisse['prefixe'], $caisse['prefixe']) : numero_suivant($db, 'vente', $reg['caisse.prefixe']);   // séquence propre à la caisse
         $now = gmdate('Y-m-d H:i:s');
         $db->prepare('INSERT INTO ventes (numero, idsession, idcaisse, iduser, idclient, date_vente, sous_total, remise, tva, total, paye, rendu, reste, cout_total, statut, note, cle) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
             ->execute([$numero, $session['idsession'], $session['idcaisse'], $user['id'], $idclient, $now, $sousTotal, round($remisesLignes + $remiseGlobale, 2), $tva, $total, $paye, $rendu, $reste, round($coutTotal, 2), 'validee', mb_substr(trim((string)($in['note'] ?? '')), 0, 300), $cle !== '' ? $cle : null]);
@@ -138,7 +141,8 @@ function vente_detail(PDO $db, array $user, $id)
     $p = $db->prepare('SELECT p.*, COALESCE(m.libelle, p.mode) AS libelle FROM vente_paiements p LEFT JOIN modes_paiement m ON m.code = p.mode WHERE p.idvente = :i ORDER BY p.idpaie'); $p->execute(['i' => $id]);
     $v['paiements'] = $p->fetchAll(PDO::FETCH_ASSOC);
     $reg = settings_all($db);
-    $v['ticket'] = ticket_reglages($reg);
+    $st = $db->prepare('SELECT * FROM caisses WHERE idcaisse = ?'); $st->execute([$v['idcaisse']]);
+    $v['ticket'] = ticket_reglages($reg, $st->fetch(PDO::FETCH_ASSOC) ?: null);
     return $v;
 }
 
@@ -191,12 +195,17 @@ function ventes_liste(PDO $db, array $user, array $q)
 }
 
 /** Catalogue allégé pour l'écran de caisse (produits et services actifs + catégories). */
-function pos_catalogue(PDO $db)
+/** Catalogue de l'écran de caisse : limité à l'assortiment de la caisse ouverte par l'utilisateur. */
+function pos_catalogue(PDO $db, array $user)
 {
-    $prod = $db->query("SELECT idprod AS id, type, nom, sku, code_barres, idcat, unite, prix_vente, tva_taux, stockable, stock_qty, seuil_alerte, image FROM produits WHERE supp = 0 AND actif = 1 AND sku <> 'FRAIS-LIV' ORDER BY nom")->fetchAll(PDO::FETCH_ASSOC);
+    $session = session_courante($db, $user['id']);
+    $caisse = $session ? caisse_ligne($db, $session['idcaisse']) : null;
+    $w = $caisse ? caisse_condition($caisse) : null;
+    $prod = $db->query("SELECT p.idprod AS id, p.type, p.nom, p.sku, p.code_barres, p.idcat, p.unite, p.prix_vente, p.tva_taux, p.stockable, p.stock_qty, p.seuil_alerte, p.image FROM produits p WHERE p.supp = 0 AND p.actif = 1 AND p.sku <> 'FRAIS-LIV'" . ($w ? " AND $w" : '') . ' ORDER BY p.nom')->fetchAll(PDO::FETCH_ASSOC);
     foreach ($prod as &$p) { $p['id'] = (int)$p['id']; $p['idcat'] = $p['idcat'] === null ? null : (int)$p['idcat']; $p['prix_vente'] += 0; $p['tva_taux'] += 0; $p['stock_qty'] += 0; $p['stockable'] = (int)$p['stockable']; $p['seuil_alerte'] += 0; }
     $cats = $db->query('SELECT idcat AS id, nom, couleur, image FROM categories WHERE supp = 0 ORDER BY ordre, nom')->fetchAll(PDO::FETCH_ASSOC);
-    return ['produits' => $prod, 'categories' => $cats, 'modes' => array_values(modes_actifs($db))];
+    if ($w) { $utiles = array_flip(array_filter(array_column($prod, 'idcat'), 'is_int')); $cats = array_values(array_filter($cats, function ($c) use ($utiles) { return isset($utiles[(int)$c['id']]); })); }
+    return ['produits' => $prod, 'categories' => $cats, 'modes' => array_values(modes_actifs($db)), 'caisse' => $caisse ? ['id' => (int)$caisse['idcaisse'], 'nom' => $caisse['nom'], 'assortiment' => $caisse['assortiment']] : null];
 }
 
 /* ---------- Ventes en attente (le client revient plus tard, on sert quelqu'un d'autre) ---------- */

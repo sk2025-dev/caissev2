@@ -694,6 +694,31 @@ check('prix masqués, numéro WhatsApp publié', $c === 200 && $jj['produits'][0
 $a->call('POST', 'catalogue-config', [], ['actif' => 0]); list($c) = $anon->call('GET', 'catalogue'); check('catalogue désactivé -> 404', $c === 404);
 $a->call('POST', 'catalogue-config', [], ['actif' => 1, 'prix' => 1]);
 
+echo "Paramétrage des caisses : produits, numérotation, ticket\n";
+list($c, $j) = $a->call('POST', 'caisses', [], ['nom' => 'Caisse Boissons', 'actif' => 1]); $cxB = $j['data']['idcaisse'] ?? 0;
+list($c) = $m->call('GET', 'caisse-config', ['id' => $cxB]); check('paramétrage des caisses refusé au magasinier', $c === 403);
+$cfgB = ['caisse' => ['nom' => 'Caisse Boissons', 'emplacement' => 'Rayon frais', 'actif' => 1, 'prefixe' => 'bx', 'ticket_perso' => 1, 'ticket_nom' => 'Boutique Boissons', 'ticket_pied' => 'Merci, à bientôt au rayon frais', 'ticket_largeur' => '58'],
+    'assortiment' => ['mode' => 'selection', 'categories' => [$catB], 'produits' => [$riz]]];
+list($c, $j) = $a->call('POST', 'caisse-config', ['id' => $cxB], array_replace_recursive($cfgB, ['caisse' => ['prefixe' => 'V']])); check('préfixe identique au préfixe commun refusé', $c === 422 && isset($j['errors']['prefixe']));
+list($c, $j) = $a->call('POST', 'caisse-config', ['id' => $cxB], array_replace_recursive($cfgB, ['caisse' => ['prefixe' => 'B-X']])); check('préfixe invalide refusé', $c === 422 && isset($j['errors']['prefixe']));
+list($c, $j) = $a->call('POST', 'caisse-config', ['id' => $cxB], ['caisse' => $cfgB['caisse'], 'assortiment' => ['mode' => 'selection']]); check('sélection vide refusée', $c === 422 && isset($j['errors']['assortiment']));
+list($c, $j) = $a->call('POST', 'caisse-config', ['id' => $cxB], $cfgB);
+check('caisse paramétrée : préfixe, sélection (catégorie + produit), ticket', $c === 200 && $j['caisse']['prefixe'] === 'BX' && $j['assortiment']['categories'] === [(int)$catB] && $j['assortiment']['produits'] === [(int)$riz] && $j['nb_vendus'] >= 2, json_encode($j['caisse'] ?? $j));
+list(, $j) = $a->call('GET', 'session-courante');
+if (!empty($j['session'])) $a->call('POST', 'session-cloturer', [], ['compte_especes' => 0, 'notes' => 'Clôture pour le test des caisses']);
+list($c) = $a->call('POST', 'session-ouvrir', [], ['idcaisse' => $cxB, 'fond_initial' => 0]);
+list($c, $j) = $a->call('GET', 'pos-catalogue'); $ids = array_column($j['produits'] ?? [], 'id');
+check('écran de caisse : seuls les produits de la caisse', $c === 200 && in_array((int)$eau, $ids, true) && in_array((int)$riz, $ids, true) && !in_array((int)$sucre, $ids, true) && $j['caisse']['nom'] === 'Caisse Boissons', json_encode($ids));
+list($c, $j) = $a->call('POST', 'vente-creer', [], ['lignes' => [['idprod' => $sucre, 'quantite' => 1]], 'paiements' => [['mode' => 'especes', 'montant' => 800]]]);
+check('produit hors assortiment refusé à la vente (serveur)', $c === 422 && strpos($j['error'] ?? '', "n'est pas vendu") !== false, json_encode($j));
+list($c, $j) = $a->call('POST', 'vente-creer', [], ['lignes' => [['idprod' => $eau, 'quantite' => 1]], 'paiements' => [['mode' => 'especes', 'montant' => 500]]]);
+check('vente : numérotation propre à la caisse, ticket personnalisé', $c === 201 && preg_match('/^BX-\d{4}-000001$/', $j['vente']['numero']) && $j['vente']['ticket']['entreprise']['nom'] === 'Boutique Boissons'
+    && $j['vente']['ticket']['pied'] === 'Merci, à bientôt au rayon frais' && $j['vente']['ticket']['largeur'] === 58, json_encode($j['vente']['ticket'] ?? $j));
+list($c, $j) = $a->call('POST', 'vente-creer', [], ['lignes' => [['idprod' => $riz, 'quantite' => 1]], 'paiements' => [['mode' => 'especes', 'montant' => 4000]]]); check('séquence continue sur la caisse', $c === 201 && substr($j['vente']['numero'], -6) === '000002');
+list(, $j) = $a->call('GET', 'vente', ['id' => $vA['idvente']]); check('les autres caisses gardent la numérotation et le ticket communs', strpos($j['vente']['numero'], 'V-') === 0 && $j['vente']['ticket']['entreprise']['nom'] !== 'Boutique Boissons');
+$a->call('POST', 'session-cloturer', [], ['compte_especes' => 0, 'notes' => 'Fin du test des caisses']);
+check('paramétrage journalisé', (bool)$pdo->query("SELECT COUNT(*) FROM audit_log WHERE entity = 'caisses' AND entity_id = " . (int)$cxB . " AND resume LIKE '%paramétrée%'")->fetchColumn());
+
 echo "Journal d'activité (traçabilité)\n";
 $e = $jr("action = 'connexion_echec' AND acteur = 'admin@test.local'"); check('échec de connexion journalisé (compte visé, e-mail saisi, IP)', $e && (int)$e['entity_id'] > 0 && $e['user_id'] === null && $e['ip'] !== '', json_encode($e));
 check('connexion réussie journalisée', (bool)$jr("action = 'connexion' AND module = 'securite'"));

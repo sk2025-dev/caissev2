@@ -69,5 +69,5 @@ export async function logout() {
   try { await request('POST', 'auth/logout') } finally { auth.user = null }
 }
 
-export const catalogueImageUrl = (name) => `${BASE}?r=catalogue-image&f=${encodeURIComponent(name)}`   // photo publique (catalogue numérique)
+export const catalogueImageUrl = (name, dossier = 'produits') => `${BASE}?r=catalogue-image&d=${dossier}&f=${encodeURIComponent(name)}`   // photo publique (catalogue numérique)
 export const fileUrl = (dir, name) => `${BASE}?r=fichier&d=${dir}&f=${encodeURIComponent(name)}`

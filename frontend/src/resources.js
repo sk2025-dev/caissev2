@@ -155,15 +155,19 @@ export const resources = {
   },
 
   caisses: {
-    pk: 'idcaisse', feminine: true, refreshLookups: true, write: (u) => !!u?.admin,
-    title: 'Caisses', singular: 'caisse', subtitle: 'Points d\'encaissement de l\'entreprise',
+    pk: 'idcaisse', feminine: true, refreshLookups: true, write: (u) => !!u?.admin, detail: (r) => `/caisses/${r.idcaisse}`,
+    title: 'Caisses', singular: 'caisse', subtitle: 'Points d\'encaissement : produits vendus, numérotation et ticket propres à chaque caisse (cliquez sur une caisse pour la paramétrer)',
     searchPlaceholder: 'Rechercher une caisse…',
     columns: [
       { key: 'nom', label: 'Nom', sort: 'nom', cls: 'strong' },
+      { key: 'emplacement', label: 'Emplacement', format: (r) => r.emplacement || '—' },
+      { key: 'assortiment', label: 'Produits vendus', badge: (r) => (r.assortiment === 'selection' ? { text: 'Sélection', cls: 'primary' } : { text: 'Tous', cls: '' }) },
+      { key: 'prefixe', label: 'Numérotation', format: (r) => (r.prefixe ? `${r.prefixe}-…` : 'Commune') },
+      { key: 'ticket_perso', label: 'Ticket', badge: (r) => (Number(r.ticket_perso) ? { text: 'Personnalisé', cls: 'primary' } : { text: 'Commun', cls: '' }) },
       { key: 'actif', label: 'État', badge: (r) => (Number(r.actif) ? { text: 'Active', cls: 'success' } : { text: 'Désactivée', cls: '' }) },
     ],
     fields: [
-      { name: 'nom', label: 'Nom', type: 'text', required: true, full: true },
+      { name: 'nom', label: 'Nom', type: 'text', required: true, full: true, hint: () => 'Produits vendus, numérotation et ticket se règlent ensuite sur la fiche de la caisse.' },
       { name: 'actif', label: 'Active', type: 'select', default: () => 1, options: () => oui },
     ],
   },

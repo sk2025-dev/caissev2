@@ -26,6 +26,7 @@ const routes = [
   page('clients', 'Clients'),
   page('avis', 'Avis clients', { droit: 'catalogue_ecriture' }),
   { path: '/carte/:id(\\d+)?', component: () => import('./views/CarteVirtuelle.vue'), props: true, meta: { title: 'Carte virtuelle' } },
+  { path: '/caisses/:id(\\d+)', component: () => import('./views/CaisseConfig.vue'), props: true, meta: { title: 'Paramétrage de la caisse', admin: true } },
   page('caisses', 'Caisses', { admin: true }),
   page('zones-livraison', 'Tarifs de livraison', { admin: true }),
   page('utilisateurs', 'Utilisateurs', { admin: true }),

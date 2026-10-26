@@ -6,6 +6,7 @@
  *   commandes : commandes · commande · commande-creer · commande-statut · commande-livrer · commande-annuler
  *   stock : stock-ajuster · inventaire · inventaires · mouvements-stock · stock-balance    achats : appro-creer · appros · appro · reglement-creer · reglements
  *   fiches : produit-detail · client-detail · fournisseur-detail    traçabilité : journal
+ *   caisses : caisse-config (produits vendus, numérotation, ticket propres à chaque caisse)
  *   catalogue numérique (public, sans compte) : catalogue · catalogue-produit · catalogue-image    réglages : catalogue-config
  *   produits : produit-photos (envoi multiple) · produit-photo (principale, légende, ordre, retouche, suppression) · avis-synthese
  *   ressources CRUD : produits · categories · clients · fournisseurs · caisses · utilisateurs
@@ -33,6 +34,7 @@ require_once __DIR__ . '/lib/utilisateurs.php';
 require_once __DIR__ . '/lib/galerie.php';
 require_once __DIR__ . '/lib/avis.php';
 require_once __DIR__ . '/lib/catalogue.php';
+require_once __DIR__ . '/lib/caisses.php';
 
 // Le flux d'erreurs PHP ne doit jamais polluer le JSON
 ini_set('display_errors', '0');
@@ -72,7 +74,7 @@ if ($r === 'public-config') {
 /* ---- Catalogue numérique : ouvert à tous (QR code) ---- */
 if ($r === 'catalogue') json_out(catalogue_liste($bdd));
 if ($r === 'catalogue-produit') json_out(catalogue_produit($bdd, $id));
-if ($r === 'catalogue-image') catalogue_image($bdd, isset($_GET['f']) ? $_GET['f'] : '');
+if ($r === 'catalogue-image') catalogue_image($bdd, isset($_GET['f']) ? $_GET['f'] : '', isset($_GET['d']) ? $_GET['d'] : 'produits');
 if ($r === 'config-logo' && $method === 'GET') {
     $nom = settings_all($bdd)['entreprise.logo'];
     $chemin = dirname(__DIR__) . '/doc/logo/' . basename($nom);
@@ -151,7 +153,7 @@ switch ($r) {
     case 'search': json_out(recherche_globale($bdd, $user, isset($q['q']) ? $q['q'] : ''));
 
     /* ---- Caisse ---- */
-    case 'pos-catalogue': exiger($user, 'caisse.vendre'); json_out(pos_catalogue($bdd));
+    case 'pos-catalogue': exiger($user, 'caisse.vendre'); json_out(pos_catalogue($bdd, $user));
     case 'session-courante': json_out(['session' => session_courante($bdd, $user['id'])]);
     case 'caisses-occupation': json_out(['occupees' => caisses_occupation($bdd, $user)]);
     case 'session-ouvrir':
@@ -275,6 +277,10 @@ switch ($r) {
     case 'produit-detail': json_out(produit_detail($bdd, $user, $id, $resources));
     case 'produit-photos': $post(); json_out(galerie_televerser($bdd, $user, $id, $_FILES), 201);
     case 'produit-photo': $post(); json_out(galerie_action($bdd, $user, $corps, $_FILES));
+    case 'caisse-config':
+        if (!is_admin_role($user['role'])) throw new ApiError(403, 'Réservé au gérant.');
+        if ($method === 'POST') json_out(caisse_config_enregistrer($bdd, $user, $id, $corps));
+        json_out(caisse_config($bdd, $id));
     case 'catalogue-config':
         if ($method === 'POST') json_out(catalogue_config_enregistrer($bdd, $user, $corps));
         exiger($user, 'catalogue.lire'); json_out(catalogue_config($bdd));

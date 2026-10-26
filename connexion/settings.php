@@ -53,10 +53,19 @@ function settings_section(array $all, $section)
 }
 
 /** Présentation commune aux tickets de vente et de commande. */
-function ticket_reglages(array $reg)
+function ticket_reglages(array $reg, $caisse = null)
 {
     $ticket = ['entreprise' => settings_section($reg, 'entreprise'), 'entete' => $reg['caisse.ticket_entete'], 'pied' => $reg['caisse.ticket_pied'], 'largeur' => (int)$reg['caisse.ticket_largeur']];
     foreach (['logo', 'adresse', 'contact', 'identifiants'] as $k) $ticket['afficher_' . $k] = $reg['caisse.ticket_' . $k] === '1';
+    // Ticket propre à la caisse (point de vente, boutique…) : chaque information renseignée remplace celle de l'entreprise
+    if ($caisse && !empty($caisse['ticket_perso'])) {
+        if ($caisse['ticket_nom'] !== '') $ticket['entreprise']['nom'] = $caisse['ticket_nom'];
+        if ($caisse['ticket_adresse'] !== '') { $ticket['entreprise']['adresse'] = $caisse['ticket_adresse']; $ticket['entreprise']['ville'] = ''; }
+        if ($caisse['ticket_telephone'] !== '') $ticket['entreprise']['telephone'] = $caisse['ticket_telephone'];
+        if ((string)$caisse['ticket_entete'] !== '') $ticket['entete'] = $caisse['ticket_entete'];
+        if ((string)$caisse['ticket_pied'] !== '') $ticket['pied'] = $caisse['ticket_pied'];
+        if ($caisse['ticket_largeur'] !== '') $ticket['largeur'] = (int)$caisse['ticket_largeur'];
+    }
     return $ticket;
 }
 
