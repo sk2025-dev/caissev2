@@ -100,9 +100,10 @@ const nbFiltres = computed(() => actifs.value.filter((a) => a.k !== 'cats').leng
 function toutEffacer() { Object.assign(f, { q: '', cats: [], min: '', max: '', dispo: false, nouveau: false, marques: [], origines: [], note: 0 }) }
 
 /* ---- Rayons par catégorie : affichés tant qu'on ne cherche ni ne filtre ---- */
-const enRayons = computed(() => vue.value === 'rayons' && !f.q.trim() && !actifs.value.length && f.tri === 'nom' && categories.value.length > 1)
+const enRayons = computed(() => vue.value === 'rayons' && !f.q.trim() && !actifs.value.length && f.tri === 'nom' && categories.value.length > 0)
 const rayons = computed(() => categories.value.map((c) => ({ ...c, produits: tous.value.filter((p) => catDe(p) === c.id) })).filter((c) => c.produits.length))
 const MAX_RANGEE = 12
+const PETIT_RAYON = 8   // jusqu'à 8 produits : grille complète plutôt qu'une rangée à faire défiler
 </script>
 
 <template>
@@ -131,7 +132,7 @@ const MAX_RANGEE = 12
         <select v-model="f.tri" class="input tri" aria-label="Trier"><option v-for="[k, l] in tris" :key="k" :value="k">{{ l }}</option></select>
       </div>
 
-      <nav v-if="categories.length > 1" class="cats" aria-label="Catégories">
+      <nav v-if="categories.length" class="cats" aria-label="Catégories">
         <button :class="{ on: !f.cats.length }" @click="choisirCat(null)"><span class="av tout"><Icon name="grid" :size="15" /></span>Tout <small>{{ tous.length }}</small></button>
         <button v-for="c in categories" :key="c.id" :class="{ on: f.cats.includes(c.id) }" :style="c.couleur ? { '--c': c.couleur } : null" @click="choisirCat(c.id)">
           <span class="av"><img v-if="c.image" :src="catalogueImageUrl(c.image, 'categories')" alt="" /><i v-else /></span>{{ c.nom }} <small>{{ c.n }}</small>
@@ -140,7 +141,7 @@ const MAX_RANGEE = 12
 
       <!-- Rayons : une rangée défilante par catégorie -->
       <template v-if="enRayons">
-        <div class="bascule"><span class="muted">{{ rayons.length }} rayons · {{ tous.length }} produits</span>
+        <div class="bascule"><span class="muted">{{ rayons.length }} rayon{{ rayons.length > 1 ? 's' : '' }} · {{ tous.length }} produits</span>
           <div class="seg"><button class="on"><Icon name="list" :size="15" /> Par catégorie</button><button @click="vue = 'grille'"><Icon name="grid" :size="15" /> Tout</button></div>
         </div>
         <section v-for="c in rayons" :key="c.id" class="rayon">
@@ -149,7 +150,7 @@ const MAX_RANGEE = 12
             <h2>{{ c.nom }} <small>{{ c.produits.length }}</small></h2>
             <button v-if="c.produits.length > 2" class="voir" @click="choisirCat(c.id)">Tout voir <Icon name="chevR" :size="15" /></button>
           </header>
-          <div class="rangee">
+          <div class="rangee" :class="{ 'en-grille': c.produits.length <= PETIT_RAYON }">
             <div v-for="p in c.produits.slice(0, MAX_RANGEE)" :key="p.id" class="case"><CarteCatalogue :p="p" :commande="commande" /></div>
             <button v-if="c.produits.length > MAX_RANGEE" class="case plus" @click="choisirCat(c.id)"><b>+{{ c.produits.length - MAX_RANGEE }}</b>Voir tout le rayon</button>
           </div>
@@ -164,7 +165,7 @@ const MAX_RANGEE = 12
             <button v-for="a in actifs" :key="a.k" class="pastille" @click="a.x()">{{ a.t }} <Icon name="x" :size="13" /></button>
             <button class="effacer" @click="toutEffacer">Tout effacer</button>
           </div>
-          <div v-else-if="categories.length > 1 && !f.q.trim()" class="seg"><button @click="vue = 'rayons'; f.tri = 'nom'"><Icon name="list" :size="15" /> Par catégorie</button><button class="on"><Icon name="grid" :size="15" /> Tout</button></div>
+          <div v-else-if="categories.length && !f.q.trim()" class="seg"><button @click="vue = 'rayons'; f.tri = 'nom'"><Icon name="list" :size="15" /> Par catégorie</button><button class="on"><Icon name="grid" :size="15" /> Tout</button></div>
         </div>
         <div v-if="!resultats.length" class="etat"><Icon name="search" :size="40" /><p class="muted">Aucun produit ne correspond.</p><button v-if="actifs.length || f.q" class="btn" @click="toutEffacer">Effacer la recherche et les filtres</button></div>
         <div v-else class="grille">
@@ -190,7 +191,7 @@ const MAX_RANGEE = 12
                 <h3>Trier par</h3>
                 <div class="choix"><button v-for="[k, l] in tris" :key="k" :class="{ on: f.tri === k }" @click="f.tri = k">{{ l }}</button></div>
               </section>
-              <section v-if="categories.length > 1">
+              <section v-if="categories.length">
                 <h3>Catégories <small v-if="f.cats.length">{{ f.cats.length }} choisie{{ f.cats.length > 1 ? 's' : '' }}</small></h3>
                 <label v-for="c in categories" :key="c.id" class="case-a-cocher"><input type="checkbox" :checked="f.cats.includes(c.id)" @change="basculer(f.cats, c.id)" /><span>{{ c.nom }}</span><small>{{ nbCat(c.id) }}</small></label>
               </section>
@@ -282,6 +283,9 @@ const MAX_RANGEE = 12
 .rangee { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x proximity; padding: 2px 2px 10px; margin: 0 -2px; scrollbar-width: thin; }
 .case { flex: none; width: 170px; scroll-snap-align: start; }
 @media (min-width: 720px) { .case { width: 210px; } }
+.rangee.en-grille { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); overflow: visible; }
+@media (min-width: 720px) { .rangee.en-grille { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 18px; } }
+.rangee.en-grille .case { width: auto; }
 .case.plus { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 2px dashed var(--border); border-radius: 20px; background: var(--surface); color: var(--primary); font: inherit; font-weight: 700; cursor: pointer; min-height: 220px; }
 .case.plus b { font-size: 24px; }
 
