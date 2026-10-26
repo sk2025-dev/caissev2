@@ -10,6 +10,6 @@ export const SOURCES = {
   autre: { label: 'Autre', couleur: '#8b8fa3', lettre: '•' },
 }
 export const sourceOptions = () => Object.entries(SOURCES).map(([value, s]) => ({ value, label: s.label }))
+export const sourceChoix = () => Object.entries(SOURCES).map(([value, s]) => ({ value, label: s.label, color: s.couleur, icon: s.lettre }))
 export const NOTES = { 5: 'Excellent', 4: 'Très bien', 3: 'Correct', 2: 'Décevant', 1: 'Mauvais' }
-export const noteOptions = () => [5, 4, 3, 2, 1].map((n) => ({ value: n, label: `${'★'.repeat(n)}${'☆'.repeat(5 - n)}  ${n} — ${NOTES[n]}` }))
 export const etoiles = (n) => '★'.repeat(Math.round(n || 0)) + '☆'.repeat(5 - Math.round(n || 0))

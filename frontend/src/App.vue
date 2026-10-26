@@ -60,7 +60,7 @@ const nav = computed(() => [
   { to: '/clients', label: 'Clients', icon: 'user' },
   { to: '/avis', label: 'Avis clients', icon: 'star', droit: 'catalogue_ecriture' },
   { to: '/fournisseurs', label: 'Fournisseurs', icon: 'briefcase', droit: 'fournisseurs' },
-  ...(auth.user?.admin ? [{ sep: 'Administration' }, { to: '/caisses', label: 'Caisses', icon: 'wallet' }, { to: '/zones-livraison', label: 'Tarifs de livraison', icon: 'truck' }, { to: '/utilisateurs', label: 'Utilisateurs', icon: 'users' }, { to: '/journal', label: "Journal d'activité", icon: 'history' }] : []),
+  ...(auth.user?.admin ? [{ sep: 'Administration' }, { to: '/caisses', label: 'Caisses', icon: 'wallet' }, { to: '/zones-livraison', label: 'Tarifs de livraison', icon: 'truck' }, { to: '/utilisateurs', label: 'Utilisateurs', icon: 'users' }, { to: '/catalogue-qr', label: 'Catalogue numérique', icon: 'scan' }, { to: '/journal', label: "Journal d'activité", icon: 'history' }] : []),
   ...(auth.user?.super ? [{ to: '/configuration', label: 'Configuration', icon: 'settings' }] : []),
 ].filter((n) => n.sep || droit(n.droit)))
 // Entrée de menu active aussi sur ses sous-pages (ex. /vehicules/3) ; « / » uniquement en exact
@@ -96,7 +96,7 @@ provide('deconnecter', doLogout)
 </script>
 
 <template>
-  <div v-if="auth.user" class="shell" :class="{ masque, kiosque }">
+  <div v-if="auth.user && !route.meta.vitrine" class="shell" :class="{ masque, kiosque }">
     <aside v-if="!kiosque" id="menu-lateral" class="sidebar" :class="{ open: menuOpen }" :aria-hidden="masque && !menuOpen ? 'true' : undefined" :inert="masque && !menuOpen">
       <div class="brand"><img v-if="logoUrl" :src="logoUrl" alt="" class="brand-logo" /><span v-else class="logo"><Icon name="cart" :size="21" /></span> {{ nomApp }}</div>
       <nav class="nav" aria-label="Navigation principale">
@@ -162,7 +162,7 @@ provide('deconnecter', doLogout)
   </div>
   <template v-else>
     <RouterView />
-    <AppFooter class="on-login" />
+    <AppFooter v-if="!route.meta.vitrine" class="on-login" />
   </template>
 
   <div v-if="verrou" class="lock" role="alertdialog" aria-modal="true">

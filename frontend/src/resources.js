@@ -1,7 +1,7 @@
 // Configuration déclarative des écrans CRUD : colonnes du tableau et champs du formulaire.
 import { money, qty, uniteAccord } from './format'
 import { fileUrl } from './api'
-import { SOURCES, sourceOptions, noteOptions, etoiles } from './avis'
+import { SOURCES, NOTES, sourceOptions, sourceChoix, etoiles } from './avis'
 
 // Champs du formulaire d'avis ; fixerProduit : avis saisi depuis une fiche produit (le produit est imposé)
 export function avisChamps(fixerProduit = null) {
@@ -9,8 +9,8 @@ export function avisChamps(fixerProduit = null) {
     fixerProduit
       ? { name: 'idprod', label: 'Produit', type: 'text', default: () => fixerProduit, showIf: () => false }
       : { name: 'idprod', label: 'Produit concerné', type: 'select', full: true, options: (l) => [{ value: '', label: 'La boutique en général' }, ...(l.produits || []).map((p) => ({ value: p.id, label: p.nom }))] },
-    { name: 'source', label: 'Reçu sur', type: 'select', required: true, default: () => 'facebook', options: sourceOptions },
-    { name: 'note', label: 'Note', type: 'select', required: true, default: () => 5, options: noteOptions },
+    { name: 'source', label: 'Avis reçu sur', type: 'choice', required: true, full: true, default: () => 'facebook', options: sourceChoix },
+    { name: 'note', label: 'Note du client', type: 'stars', required: true, full: true, default: () => 5, labels: NOTES },
     { name: 'auteur', label: 'Nom du client', type: 'text' },
     { name: 'telephone', label: 'Téléphone (avis par SMS / WhatsApp)', type: 'phone' },
     { name: 'date_avis', label: "Date de l'avis", type: 'date', default: () => new Date().toISOString().slice(0, 10) },
@@ -60,6 +60,7 @@ export const resources = {
       { name: 'stock_initial', label: 'Stock initial', type: 'number', step: '0.001', createOnly: true, showIf: (f) => f.type !== 'service' },
       { name: 'seuil_alerte', label: 'Seuil d\'alerte', type: 'number', step: '0.001', showIf: (f) => f.type !== 'service' },
       { name: 'actif', label: 'Vendu en caisse', type: 'select', default: () => 1, options: () => oui },
+      { name: 'catalogue', label: 'Visible dans le catalogue numérique', type: 'select', default: () => 1, options: () => oui },
       { name: 'description', label: 'Description', type: 'textarea', full: true },
       { name: 'marque', label: 'Marque', type: 'text' },
       { name: 'modele', label: 'Modèle / gamme', type: 'text' },

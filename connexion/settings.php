@@ -18,6 +18,7 @@ const SETTINGS_DEFAUTS = [
     'caisse.tva_defaut' => '0', 'caisse.prefixe' => 'V', 'caisse.remise_max' => '10', 'caisse.stock_negatif' => '0', 'caisse.prix_libre' => '0',
     'caisse.ticket_entete' => '', 'caisse.ticket_pied' => 'Merci de votre visite !', 'caisse.ticket_largeur' => '80', 'caisse.ecart_tolere' => '500',
     'caisse.ticket_logo' => '1', 'caisse.ticket_adresse' => '1', 'caisse.ticket_contact' => '1', 'caisse.ticket_identifiants' => '1',
+    'catalogue.actif' => '1', 'catalogue.prix' => '1', 'catalogue.dispo' => '1', 'catalogue.ruptures' => '1', 'catalogue.avis' => '1', 'catalogue.whatsapp' => '', 'catalogue.message' => '',
 ];
 
 const PALETTES = ['violet' => 'Violet', 'ocean' => 'Océan', 'emeraude' => 'Émeraude', 'sunset' => 'Coucher de soleil', 'rose' => 'Rose', 'ardoise' => 'Ardoise'];

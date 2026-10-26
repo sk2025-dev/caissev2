@@ -5,6 +5,10 @@ const page = (name, title, extra = {}) => ({ path: `/${name}`, component: () => 
 
 const routes = [
   { path: '/login', component: () => import('./views/Login.vue'), meta: { public: true, title: 'Connexion' } },
+  // Catalogue numérique : ouvert à tous (QR code), sans menu ni compte
+  { path: '/catalogue', component: () => import('./views/CatalogueVitrine.vue'), meta: { public: true, vitrine: true, title: 'Catalogue' } },
+  { path: '/catalogue/:id(\\d+)', component: () => import('./views/CatalogueFiche.vue'), props: true, meta: { public: true, vitrine: true, title: 'Catalogue' } },
+  { path: '/catalogue-qr', component: () => import('./views/CatalogueQr.vue'), meta: { title: 'Catalogue numérique', admin: true } },
   { path: '/', component: () => import('./views/Dashboard.vue'), meta: { title: 'Tableau de bord' } },
   { path: '/caisse', component: () => import('./views/Pos.vue'), meta: { title: 'Caisse', droit: 'caisse', plein: true } },
   { path: '/ventes', component: () => import('./views/Ventes.vue'), meta: { title: 'Ventes', droit: ['caisse', 'ventes_toutes'] } },
@@ -47,5 +51,5 @@ router.beforeEach((to) => {
 })
 
 router.afterEach((to) => {
-  document.title = `${to.meta.title || 'Caisse'} · Caisse`
+  document.title = to.meta.vitrine ? to.meta.title : `${to.meta.title || 'Caisse'} · Caisse`
 })

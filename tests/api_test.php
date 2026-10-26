@@ -673,6 +673,27 @@ list($c, $j) = $m->call('POST', 'produits', ['id' => $riz], ['marque' => 'Uncle 
 check('fiche produit détaillée : marque, origine, caractéristiques', $c === 200 && $j['data']['marque'] === 'Uncle Ben' && strpos($j['data']['caracteristiques'], 'Cuisson') !== false);
 check('photos et avis journalisés', (bool)$jr("action = 'photo' AND entity_id = $riz") && (bool)$jr("entity = 'avis' AND action = 'create'"));
 
+echo "Catalogue numérique public (QR code)\n";
+$anon = new Client();
+list($c, $j) = $anon->call('GET', 'catalogue'); $pr = $j['produits'] ?? []; $rizPub = current(array_filter($pr, function ($p) use ($riz) { return $p['id'] === (int)$riz; }));
+check('catalogue ouvert sans compte : produits, prix, disponibilité', $c === 200 && $rizPub && $rizPub['prix'] == 4000 && in_array($rizPub['dispo'], ['ok', 'bas', 'rupture'], true), json_encode($j));
+check('catalogue : ni prix d\'achat ni quantité en stock', $c === 200 && strpos(json_encode($j), 'prix_achat') === false && strpos(json_encode($j), 'stock_qty') === false);
+check('catalogue : note des avis', $rizPub && $rizPub['note'] == 3.5 && $rizPub['nb_avis'] === 2);
+$m->call('POST', 'produits', ['id' => $savon], ['catalogue' => 0]);
+list(, $j) = $anon->call('GET', 'catalogue'); check('produit retiré du catalogue (toujours vendu en caisse)', !in_array((int)$savon, array_column($j['produits'], 'id'), true));
+list($c) = $anon->call('GET', 'catalogue-produit', ['id' => $savon]); check('fiche d\'un produit retiré -> 404', $c === 404);
+list($c, $j) = $anon->call('GET', 'catalogue-produit', ['id' => $riz]); $txt = json_encode($j, JSON_UNESCAPED_UNICODE);
+check('fiche publique : photos, fiche technique, avis anonymisés', $c === 200 && count($j['photos']) === 1 && $j['produit']['origine'] === 'Thaïlande' && in_array('Awa K.', array_column($j['avis'], 'auteur'), true), $txt);
+check('fiche publique : ni téléphone ni capture des avis', strpos($txt, '+225 07 12') === false && strpos($txt, 'capture') === false);
+list($c) = $anon->call('GET', 'catalogue-image', ['f' => $ph[0]['fichier']]); check('photo publique d\'un produit du catalogue', $c === 200);
+list($c) = $anon->call('GET', 'catalogue-image', ['f' => '../../.env']); check('aucun autre fichier accessible par la route des photos', $c === 404);
+list($c) = $m->call('POST', 'catalogue-config', [], ['prix' => 0]); check('réglages du catalogue refusés au magasinier', $c === 403);
+list($c, $j) = $a->call('POST', 'catalogue-config', [], ['whatsapp' => '0707']); check('numéro WhatsApp contrôlé', $c === 422 && isset($j['errors']['whatsapp']));
+list($c, $j) = $a->call('POST', 'catalogue-config', [], ['prix' => 0, 'whatsapp' => '+225 07 00 00 00 01']); list(, $jj) = $anon->call('GET', 'catalogue');
+check('prix masqués, numéro WhatsApp publié', $c === 200 && $jj['produits'][0]['prix'] === null && $jj['reglages']['whatsapp'] === '2250700000001', json_encode($jj['reglages'] ?? $jj));
+$a->call('POST', 'catalogue-config', [], ['actif' => 0]); list($c) = $anon->call('GET', 'catalogue'); check('catalogue désactivé -> 404', $c === 404);
+$a->call('POST', 'catalogue-config', [], ['actif' => 1, 'prix' => 1]);
+
 echo "Journal d'activité (traçabilité)\n";
 $e = $jr("action = 'connexion_echec' AND acteur = 'admin@test.local'"); check('échec de connexion journalisé (compte visé, e-mail saisi, IP)', $e && (int)$e['entity_id'] > 0 && $e['user_id'] === null && $e['ip'] !== '', json_encode($e));
 check('connexion réussie journalisée', (bool)$jr("action = 'connexion' AND module = 'securite'"));

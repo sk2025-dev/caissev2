@@ -19,6 +19,7 @@ const fields = computed(() => props.config.fields.filter((f) => !(f.editOnly && 
 const files = reactive({})
 const errors = ref({})
 const hints = reactive({})
+const survol = reactive({})   // étoile survolée (champ « stars »)
 const quick = ref(null) // { field, name } : création à la volée en cours
 const saving = ref(false)
 const general = ref('')
@@ -91,6 +92,8 @@ const title = computed(() => (editing.value ? `Modifier ${props.config.singular}
 </script>
 
 <template>
+  <!-- Rendu au niveau de la page : un parent animé (transform) enfermerait sinon le tiroir dans son cadre -->
+  <Teleport to="body">
   <div class="overlay" @click.self="emit('close')" @keydown.esc="emit('close')">
     <form class="drawer" novalidate role="dialog" aria-modal="true" :aria-label="title" @submit.prevent="submit">
       <header>
@@ -103,7 +106,18 @@ const title = computed(() => (editing.value ? `Modifier ${props.config.singular}
         <div v-for="f in fields" :key="f.name" class="field" :class="{ full: f.full || f.type === 'textarea', invalid: errors[f.name] }">
           <label :for="'f-' + f.name">{{ f.label }} <span v-if="isRequired(f)" class="req" aria-hidden="true">*</span></label>
 
-          <SearchSelect v-if="f.type === 'select'" :id="'f-' + f.name" v-model="form[f.name]" :options="options(f)" :invalid="!!errors[f.name]"
+          <div v-if="f.type === 'stars'" :id="'f-' + f.name" class="stars-input" role="radiogroup" :aria-label="f.label" @mouseleave="survol[f.name] = 0">
+            <button v-for="n in 5" :key="n" type="button" role="radio" :aria-checked="Number(form[f.name]) === n" :aria-label="`${n} sur 5`"
+                    :class="{ on: n <= (survol[f.name] || Number(form[f.name])) }" @mouseenter="survol[f.name] = n" @click="form[f.name] = n">★</button>
+            <span class="stars-label">{{ f.labels?.[survol[f.name] || form[f.name]] }}</span>
+          </div>
+          <div v-else-if="f.type === 'choice'" :id="'f-' + f.name" class="choice-input" role="radiogroup" :aria-label="f.label">
+            <button v-for="o in options(f)" :key="o.value" type="button" role="radio" :aria-checked="String(form[f.name]) === String(o.value)"
+                    :class="{ on: String(form[f.name]) === String(o.value) }" :style="o.color ? { '--c': o.color } : null" @click="form[f.name] = o.value">
+              <i v-if="o.icon" aria-hidden="true">{{ o.icon }}</i>{{ o.label }}
+            </button>
+          </div>
+          <SearchSelect v-else-if="f.type === 'select'" :id="'f-' + f.name" v-model="form[f.name]" :options="options(f)" :invalid="!!errors[f.name]"
                         :create-label="f.create?.label" @create="(name) => (quick = { field: f, name })" />
           <textarea v-else-if="f.type === 'textarea'" :id="'f-' + f.name" v-model="form[f.name]" class="input" />
           <FileDrop v-else-if="f.type === 'file'" :id="'f-' + f.name" v-model="files[f.name]" :accept="f.accept" :current="row ? row[f.name] : ''" :current-url="row && row[f.name] ? fileUrl(f.dir, row[f.name]) : ''" :invalid="!!errors[f.name]" />
@@ -125,4 +139,5 @@ const title = computed(() => (editing.value ? `Modifier ${props.config.singular}
     </form>
     <QuickCreate v-if="quick" :spec="quick.field.create" :name="quick.name" @close="quick = null" @created="onQuickCreated" />
   </div>
+  </Teleport>
 </template>

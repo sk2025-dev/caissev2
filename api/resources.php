@@ -91,6 +91,7 @@ return [
             'stockable' => ['type' => 'enum', 'values' => [0, 1]],
             'seuil_alerte' => ['type' => 'number'],
             'actif' => ['type' => 'enum', 'values' => [0, 1]],
+            'catalogue' => ['type' => 'enum', 'values' => [0, 1]],   // présenté dans le catalogue numérique public
             'description' => ['type' => 'string', 'max' => 5000],
             'marque' => ['type' => 'string', 'max' => 80],
             'modele' => ['type' => 'string', 'max' => 80],

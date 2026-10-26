@@ -6,6 +6,7 @@
  *   commandes : commandes · commande · commande-creer · commande-statut · commande-livrer · commande-annuler
  *   stock : stock-ajuster · inventaire · inventaires · mouvements-stock · stock-balance    achats : appro-creer · appros · appro · reglement-creer · reglements
  *   fiches : produit-detail · client-detail · fournisseur-detail    traçabilité : journal
+ *   catalogue numérique (public, sans compte) : catalogue · catalogue-produit · catalogue-image    réglages : catalogue-config
  *   produits : produit-photos (envoi multiple) · produit-photo (principale, légende, ordre, retouche, suppression) · avis-synthese
  *   ressources CRUD : produits · categories · clients · fournisseurs · caisses · utilisateurs
  */
@@ -31,6 +32,7 @@ require_once __DIR__ . '/lib/fiches.php';
 require_once __DIR__ . '/lib/utilisateurs.php';
 require_once __DIR__ . '/lib/galerie.php';
 require_once __DIR__ . '/lib/avis.php';
+require_once __DIR__ . '/lib/catalogue.php';
 
 // Le flux d'erreurs PHP ne doit jamais polluer le JSON
 ini_set('display_errors', '0');
@@ -67,6 +69,10 @@ if ($r === 'auth/me') {
 if ($r === 'public-config') {
     json_out(config_publique($bdd));
 }
+/* ---- Catalogue numérique : ouvert à tous (QR code) ---- */
+if ($r === 'catalogue') json_out(catalogue_liste($bdd));
+if ($r === 'catalogue-produit') json_out(catalogue_produit($bdd, $id));
+if ($r === 'catalogue-image') catalogue_image($bdd, isset($_GET['f']) ? $_GET['f'] : '');
 if ($r === 'config-logo' && $method === 'GET') {
     $nom = settings_all($bdd)['entreprise.logo'];
     $chemin = dirname(__DIR__) . '/doc/logo/' . basename($nom);
@@ -269,6 +275,10 @@ switch ($r) {
     case 'produit-detail': json_out(produit_detail($bdd, $user, $id, $resources));
     case 'produit-photos': $post(); json_out(galerie_televerser($bdd, $user, $id, $_FILES), 201);
     case 'produit-photo': $post(); json_out(galerie_action($bdd, $user, $corps, $_FILES));
+    case 'catalogue-config':
+        if ($method === 'POST') json_out(catalogue_config_enregistrer($bdd, $user, $corps));
+        exiger($user, 'catalogue.lire'); json_out(catalogue_config($bdd));
+    case 'catalogue-apercu': exiger($user, 'catalogue.lire'); json_out(catalogue_liste($bdd, true));
     case 'avis-synthese': json_out(['synthese' => avis_synthese($bdd), 'sources' => AVIS_SOURCES]);
     case 'client-detail': json_out(client_detail($bdd, $user, $id, $resources));
     case 'fournisseur-detail': exiger($user, 'fournisseurs.lire'); json_out(fournisseur_detail($bdd, $user, $id, $resources));
