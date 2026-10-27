@@ -253,3 +253,102 @@ function commande_annuler(PDO $db, array $user, array $in)
         return commande_detail($db, $user, $id);
     });
 }
+
+/* ---------- Fiche de livraison journalière (PDF) ---------- */
+
+/**
+ * Commandes d'une journée : prévues ce jour-là (ou prises ce jour-là, sans date prévue), hors annulées ; pour aujourd'hui
+ * ou un jour à venir, s'y ajoutent celles des jours précédents qui ne sont pas encore livrées (en retard).
+ * Groupées par livreur puis par lieu : chaque livreur suit sa tournée dans l'ordre.
+ */
+function commandes_jour(PDO $db, array $user, array $q)
+{
+    exiger($user, 'commandes.lire');
+    $jour = trim((string)($q['date'] ?? '')) ?: date('Y-m-d');
+    $d = DateTime::createFromFormat('Y-m-d', $jour);
+    if (!$d || $d->format('Y-m-d') !== $jour) throw new ApiError(422, 'Données invalides', ['date' => 'Date invalide']);
+    $mode = in_array($q['mode'] ?? '', ['retrait', 'tous'], true) ? $q['mode'] : 'livraison';
+    $jourCmd = 'DATE(COALESCE(c.date_prevue, c.created_at))';
+    $where = ["c.statut <> 'annulee'", $jour >= date('Y-m-d') ? "($jourCmd = :j OR ($jourCmd < :j2 AND c.statut <> 'livree'))" : "$jourCmd = :j"];
+    $p = ['j' => $jour] + ($jour >= date('Y-m-d') ? ['j2' => $jour] : []);
+    if ($mode !== 'tous') { $where[] = 'c.mode = :m'; $p['m'] = $mode; }
+    if (!empty($q['zone']) && isset(CMD_ZONES[$q['zone']])) { $where[] = "c.mode = 'livraison' AND c.zone = :z"; $p['z'] = $q['zone']; }
+    $livreur = trim((string)($q['livreur'] ?? ''));
+    if ($livreur !== '') { $where[] = 'c.livreur = :l'; $p['l'] = $livreur; }
+    $st = $db->prepare("SELECT c.*, $jourCmd AS jour FROM commandes c WHERE " . implode(' AND ', $where) . " ORDER BY c.livreur = '', c.livreur, c.mode, c.zone, c.commune, c.lieu, COALESCE(c.date_prevue, c.created_at), c.idcommande");
+    $st->execute($p);
+    $commandes = $st->fetchAll(PDO::FETCH_ASSOC);
+    $lignes = [];
+    if ($commandes) {
+        $ids = implode(',', array_map('intval', array_column($commandes, 'idcommande')));
+        foreach ($db->query("SELECT idcommande, designation, unite, quantite FROM commande_lignes WHERE idcommande IN ($ids) ORDER BY idligne")->fetchAll(PDO::FETCH_ASSOC) as $l) $lignes[$l['idcommande']][] = $l;
+    }
+    $resume = ['nb' => 0, 'livrees' => 0, 'retards' => 0, 'articles' => 0, 'a_encaisser' => 0, 'livreurs' => [], 'sans_livreur' => 0];
+    foreach ($commandes as &$c) {
+        $c['lignes'] = $lignes[$c['idcommande']] ?? [];
+        $c['retard'] = $c['jour'] < $jour;
+        $c['a_encaisser'] = $c['statut'] === 'livree' ? 0 : (float)$c['total'];
+        $resume['nb']++; $resume['articles'] += count($c['lignes']); $resume['a_encaisser'] += $c['a_encaisser'];
+        if ($c['statut'] === 'livree') $resume['livrees']++;
+        if ($c['retard']) $resume['retards']++;
+        if ($c['livreur'] === '') $resume['sans_livreur']++;
+        else {
+            $r = &$resume['livreurs'][$c['livreur']];
+            $r = ['nom' => $c['livreur'], 'nb' => ($r['nb'] ?? 0) + 1, 'a_encaisser' => ($r['a_encaisser'] ?? 0) + $c['a_encaisser']];
+            unset($r);
+        }
+    }
+    unset($c);
+    $resume['a_encaisser'] = round($resume['a_encaisser'], 2);
+    $resume['livreurs'] = array_values($resume['livreurs']);
+    return ['date' => $jour, 'mode' => $mode, 'zone' => (string)($q['zone'] ?? ''), 'livreur' => $livreur, 'commandes' => $commandes, 'resume' => $resume];
+}
+
+/** Coupe un texte en lignes qui tiennent dans la largeur ; la dernière est abrégée au besoin. */
+function pdf_couper($texte, $taille, $largeur, $max)
+{
+    $mots = preg_split('/\s+/u', trim((string)$texte), -1, PREG_SPLIT_NO_EMPTY);
+    $out = []; $cur = '';
+    foreach ($mots as $m) {
+        $essai = $cur === '' ? $m : "$cur $m";
+        if ($cur !== '' && Pdf::width($essai, $taille) > $largeur) { $out[] = $cur; $cur = $m; } else $cur = $essai;
+    }
+    if ($cur !== '') $out[] = $cur;
+    if (count($out) > $max) { $out = array_slice($out, 0, $max); $out[$max - 1] .= '...'; }
+    return $out;
+}
+
+function commandes_jour_pdf(array $d, array $per, $path)
+{
+    $cols = [['Commande', 66, 'L'], ['Client', 108, 'L'], [$d['mode'] === 'retrait' ? 'Retrait' : 'Lieu de livraison', 150, 'L'], ['Articles', 160, 'L'], ['Livreur', 70, 'L'], ['État', 58, 'L'], ['À encaisser', 66, 'R'], ['Reçu par / signature', 92, 'L']];
+    $etat = ['nouvelle' => 'Reçue', 'preparation' => 'En préparation', 'prete' => 'Prête', 'en_livraison' => 'En livraison', 'livree' => 'Livrée'];
+    $rows = [];
+    foreach ($d['commandes'] as $c) {
+        $heure = $c['date_prevue'] ? ($c['retard'] ? 'Prévue le ' . date('d/m', strtotime($c['date_prevue'])) : 'Prévue ' . date('H:i', strtotime($c['date_prevue']))) : '';
+        $lieu = $c['mode'] === 'livraison'
+            ? array_merge([(CMD_ZONES[$c['zone']] ?? $c['zone']) . ' · ' . trim(($c['commune'] !== '' ? $c['commune'] . ' - ' : '') . $c['lieu'])], pdf_couper($c['adresse'], 7.5, 135, 2))
+            : ['Retrait en boutique'];
+        if ($c['note'] !== '') $lieu[] = 'Note : ' . $c['note'];
+        $articles = array_map(function ($l) { return pdf_num($l['quantite'], '0') . ' ' . ($l['unite'] !== 'pièce' ? mb_substr($l['unite'], 0, 6) . ' ' : '× ') . $l['designation']; }, array_slice($c['lignes'], 0, 8));
+        if (count($c['lignes']) > 8) $articles[] = '... et ' . (count($c['lignes']) - 8) . ' autre(s) article(s)';
+        $rows[] = [
+            array_values(array_filter([$c['numero'], $heure, $c['retard'] ? 'EN RETARD' : ''], 'strlen')),
+            array_values(array_filter([$c['client_nom'], $c['client_tel']], 'strlen')),
+            $lieu, $articles ?: ['-'], $c['livreur'] !== '' ? $c['livreur'] : '-', $etat[$c['statut']] ?? $c['statut'],
+            $c['statut'] === 'livree' ? 'Payée' : pdf_num($c['total'], '0'), '',
+        ];
+    }
+    $r = $d['resume'];
+    $quoi = $d['mode'] === 'retrait' ? 'retraits' : ($d['mode'] === 'livraison' ? 'livraisons' : 'commandes');
+    $bloc = [[ucfirst($quoi) . ' sur la fiche', (string)$r['nb'], true], ['Montant à encaisser', pdf_num($r['a_encaisser'], '0') . ' ' . $per['devise'], true], ['Déjà livrées', (string)$r['livrees']], ['En retard (jours précédents)', (string)$r['retards']]];
+    foreach ($r['livreurs'] as $l) $bloc[] = ['Livreur ' . $l['nom'] . ' (' . $l['nb'] . ')', pdf_num($l['a_encaisser'], '0')];
+    if ($r['sans_livreur']) $bloc[] = ['Sans livreur attribué', (string)$r['sans_livreur']];
+    $bloc[] = ['', '']; $bloc[] = ['Visa du responsable', '____________________']; $bloc[] = ['', '']; $bloc[] = ['Visa du livreur', '____________________'];
+    $filtres = array_filter([$d['zone'] !== '' ? CMD_ZONES[$d['zone']] ?? '' : '', $d['livreur'] !== '' ? 'livreur ' . $d['livreur'] : ''], 'strlen');
+    $titre = $d['mode'] === 'retrait' ? 'Fiche des retraits du jour' : ($d['mode'] === 'livraison' ? 'Fiche de livraison du jour' : 'Fiche des commandes du jour');
+    $jourFr = MOIS_FR[(int)substr($d['date'], 5, 2) - 1];
+    $sous = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'][(int)date('N', strtotime($d['date'])) - 1] . ' ' . (int)substr($d['date'], 8, 2) . ' ' . $jourFr . ' ' . substr($d['date'], 0, 4)
+        . ($filtres ? ' · ' . implode(' · ', $filtres) : '') . ' — montants en ' . $per['devise'];
+    pdf_tableau($cols, $rows, $titre, $sous, $per, 'Édité le ' . date('d/m/Y à H:i') . ' par ' . $per['qui'], $path,
+        ['TOTAL', $r['nb'] . ' ' . $quoi, '', $r['articles'] . ' ligne(s)', '', '', pdf_num($r['a_encaisser'], '0'), ''], $bloc);
+}

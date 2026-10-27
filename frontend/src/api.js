@@ -41,6 +41,24 @@ export async function request(method, route, { params = {}, body = null, silent4
   return data
 }
 
+/** Document généré à la volée (PDF) : renvoie un Blob ; une erreur du serveur (JSON) devient une ApiError. */
+export async function requestBlob(route, params = {}) {
+  const qs = new URLSearchParams({ r: route })
+  for (const [k, v] of Object.entries(params)) if (v !== '' && v != null) qs.set(k, v)
+  let res
+  try {
+    res = await fetch(`${BASE}?${qs}`, { credentials: 'same-origin' })
+  } catch {
+    throw new ApiError(0, 'Serveur injoignable. Vérifiez votre connexion.')
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    if (res.status === 401) auth.user = null
+    throw new ApiError(res.status, data?.error || `Erreur ${res.status}`, data?.errors, data?.code)
+  }
+  return res.blob()
+}
+
 export const api = {
   get: (route, params) => request('GET', route, { params }),
   post: (route, body, params) => request('POST', route, { body, params }),

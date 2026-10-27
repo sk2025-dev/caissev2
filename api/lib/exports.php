@@ -211,7 +211,8 @@ function build_stock_csv(array $d, $path)
 /* ================= PDF ================= */
 
 /**
- * Tableau paginé : $cols = [[titre, largeur, alignement]], $rows = lignes de textes, $total = ligne de totaux facultative.
+ * Tableau paginé : $cols = [[titre, largeur, alignement]], $rows = lignes de textes (une cellule peut être une liste de lignes :
+ * la rangée s'agrandit d'autant), $total = ligne de totaux facultative.
  * En-tête (logo, entreprise, mention, coordonnées) et pied de page (mentions légales, édition, pagination) repris de la configuration ;
  * couleurs du thème choisi.
  */
@@ -239,20 +240,25 @@ function pdf_tableau(array $cols, array $rows, $titre, $sous, array $per, $edite
         foreach ($cols as $col) { $pdf->text($xc + 4, $haut + 14, $col[0], 7.5, true, $col[2], $col[1] - 8); $xc += $col[1]; }
         return $haut + 22;
     };
-    $ligne = function ($y, array $cells, $gras = false, $fond = null) use ($pdf, $cols, $M, $W, $rowH, $c) {
-        if ($fond) $pdf->rect($M, $y, $W, $rowH, $fond);
+    $hauteur = function (array $cells) use ($rowH) { return $rowH + (max(array_map(function ($x) { return is_array($x) ? max(1, count($x)) : 1; }, $cells)) - 1) * 10; };
+    $ligne = function ($y, array $cells, $gras = false, $fond = null) use ($pdf, $cols, $M, $W, $c, $hauteur) {
+        $h = $hauteur($cells);
+        if ($fond) $pdf->rect($M, $y, $W, $h, $fond);
         $x = $M;
-        foreach ($cols as $i => $col) { $pdf->text($x + 4, $y + 10, (string)$cells[$i], 8, $gras, $col[2], $col[1] - 8); $x += $col[1]; }
-        $pdf->line($M, $y + $rowH, $M + $W, $y + $rowH, $c['trait'], 0.4);
-        return $y + $rowH;
+        foreach ($cols as $i => $col) {
+            foreach (array_values((array)$cells[$i]) as $k => $t) $pdf->text($x + 4, $y + 10 + $k * 10, (string)$t, $k ? 7.5 : 8, $gras && !$k, $col[2], $col[1] - 8, $k ? '4A4360' : '2A2340');
+            $x += $col[1];
+        }
+        $pdf->line($M, $y + $h, $M + $W, $y + $h, $c['trait'], 0.4);
+        return $y + $h;
     };
     $basPage = 48;   // pied de page sur deux lignes
-    $y = $entete(); $lim = Pdf::H - $basPage - 6 - $rowH;
-    foreach ($rows as $r) { if ($y > $lim) $y = $entete(); $y = $ligne($y, $r); }
-    if ($total) { if ($y > $lim) $y = $entete(); $y = $ligne($y, $total, true, $c['douce']); }
+    $y = $entete(); $lim = Pdf::H - $basPage - 6;
+    foreach ($rows as $r) { if ($y + $hauteur($r) > $lim) $y = $entete(); $y = $ligne($y, $r); }
+    if ($total) { if ($y + $hauteur($total) > $lim) $y = $entete(); $y = $ligne($y, $total, true, $c['douce']); }
     if ($blocFinal) {
         $y += 18;
-        if ($y + count($blocFinal) * 14 + 24 > Pdf::H - $basPage) $y = $entete();
+        if ($y + count($blocFinal) * 14 + 24 > Pdf::H - $basPage) $y = $entete() + 18;
         foreach ($blocFinal as $b) { $pdf->text($M, $y, $b[0], 9, !empty($b[2]), 'L', 0, '2A2340'); $pdf->text($M + 230, $y, $b[1], 9, !empty($b[2]), 'R', 120, '2A2340'); $y += 14; }
     }
     $nb = $pdf->pageCount();

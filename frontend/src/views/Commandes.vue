@@ -1,9 +1,9 @@
 <script setup>
 // Commandes clients et livraisons : suivi par étapes, bon de livraison, remise avec encaissement (qui crée la vente).
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { api, auth, ApiError } from '../api'
+import { api, auth, ApiError, requestBlob } from '../api'
 import { lookups, loadLookups } from '../lookups'
-import { money, qty, dateHeure, number } from '../format'
+import { money, qty, dateHeure, number, today } from '../format'
 import { STATUTS, libelleStatut, finale, suivante, datePrevue, enRetard } from '../commandes'
 import { toast } from '../toast'
 import Icon from '../components/Icon.vue'
@@ -41,6 +41,49 @@ watch(() => f.q, () => { clearTimeout(timer); timer = setTimeout(() => { f.page 
 watch(() => [f.statut, f.mode, f.zone], () => { f.page = 1; load() })
 onMounted(() => { loadLookups().catch(() => {}); load() })
 onBeforeUnmount(() => clearTimeout(timer))
+
+/* ---- Fiche de livraison du jour (PDF) ---- */
+const jourDecale = (n) => { const d = new Date(today() + 'T12:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10) }
+const fiche = reactive({ ouvert: false, date: '', mode: 'livraison', zone: '', livreur: '', apercu: null, charge: false, busy: false })
+function ouvrirFiche() {
+  Object.assign(fiche, { ouvert: true, date: today(), mode: f.mode === 'retrait' ? 'retrait' : 'livraison', zone: f.zone, livreur: '', apercu: null })
+}
+let seqFiche = 0
+async function apercuFiche() {
+  const my = ++seqFiche
+  fiche.charge = true
+  try {
+    const res = await api.get('commandes-jour', { date: fiche.date, mode: fiche.mode, zone: fiche.zone })
+    if (my !== seqFiche) return
+    fiche.apercu = res.resume
+    if (fiche.livreur && !res.resume.livreurs.some((l) => l.nom === fiche.livreur)) fiche.livreur = ''
+  } catch (e) { if (my === seqFiche) { fiche.apercu = null; toast(e.message, 'error') } } finally { if (my === seqFiche) fiche.charge = false }
+}
+watch(() => fiche.ouvert && [fiche.date, fiche.mode, fiche.zone], (v) => { if (v && fiche.date) apercuFiche() })
+// Ce que contiendra la fiche : tout le jour, ou la part du livreur choisi
+const ficheChiffres = computed(() => {
+  const a = fiche.apercu
+  if (!a) return null
+  if (!fiche.livreur) return { nb: a.nb, montant: a.a_encaisser, retards: a.retards, livrees: a.livrees }
+  const l = a.livreurs.find((x) => x.nom === fiche.livreur)
+  return { nb: l?.nb || 0, montant: l?.a_encaisser || 0 }
+})
+async function imprimerFiche() {
+  const onglet = window.open('', '_blank')   // ouvert pendant le clic : sinon bloqué comme fenêtre surgissante
+  fiche.busy = true
+  try {
+    const blob = await requestBlob('commandes-jour-pdf', { date: fiche.date, mode: fiche.mode, zone: fiche.zone, livreur: fiche.livreur })
+    const url = URL.createObjectURL(blob)
+    if (onglet) onglet.location.href = url
+    else Object.assign(document.createElement('a'), { href: url, download: `livraisons-${fiche.date}.pdf` }).click()
+    setTimeout(() => URL.revokeObjectURL(url), 60000)
+    fiche.ouvert = false
+  } catch (e) {
+    onglet?.close()
+    if (!(e instanceof ApiError)) throw e
+    toast(e.errors?.date || e.message, 'error')
+  } finally { fiche.busy = false }
+}
 
 /* ---- Création ---- */
 const creation = ref(false)
@@ -118,7 +161,10 @@ const nomEtape = (s) => ({ ...{ livree: detail.value?.mode === 'retrait' ? 'Reti
   <main class="page">
     <div class="page-head">
       <div><h1>Commandes et livraisons</h1><p>Prenez une commande, suivez sa préparation et encaissez à la remise.</p></div>
-      <button v-if="peutCreer" class="btn primary" @click="creation = true"><Icon name="plus" :size="16" /> Nouvelle commande</button>
+      <div class="tete-actions">
+        <button class="btn" @click="ouvrirFiche"><Icon name="printer" :size="16" /> Fiche du jour</button>
+        <button v-if="peutCreer" class="btn primary" @click="creation = true"><Icon name="plus" :size="16" /> Nouvelle commande</button>
+      </div>
     </div>
 
     <div class="card">
@@ -201,6 +247,43 @@ const nomEtape = (s) => ({ ...{ livree: detail.value?.mode === 'retrait' ? 'Reti
 
         <FicheLivraison v-if="!vente && !ticketCommande" :commande="detail" />
       </div>
+    </div>
+
+    <!-- ===== Fiche de livraison du jour ===== -->
+    <div v-if="fiche.ouvert" class="overlay center" @click.self="!fiche.busy && (fiche.ouvert = false)" @keydown.esc="fiche.ouvert = false">
+      <form class="modal fiche" role="dialog" aria-modal="true" aria-labelledby="fj-titre" novalidate @submit.prevent="imprimerFiche">
+        <h3 id="fj-titre">Fiche de livraison du jour</h3>
+        <p class="muted">Un PDF à imprimer ou à remettre au livreur : clients, lieux, articles, montants à encaisser et une case de signature.</p>
+        <div class="field">
+          <label for="fj-date">Jour</label>
+          <div class="jour">
+            <input id="fj-date" v-model="fiche.date" class="input" type="date" required />
+            <button v-for="[n, l] in [[0, 'Aujourd’hui'], [1, 'Demain']]" :key="n" type="button" class="chip" :class="{ on: fiche.date === jourDecale(n) }" @click="fiche.date = jourDecale(n)">{{ l }}</button>
+          </div>
+        </div>
+        <div class="two">
+          <div class="field"><label for="fj-mode">Commandes</label><SearchSelect id="fj-mode" v-model="fiche.mode" :options="[{ value: 'livraison', label: 'Livraisons' }, { value: 'retrait', label: 'Retraits en boutique' }, { value: 'tous', label: 'Livraisons et retraits' }]" /></div>
+          <div class="field"><label for="fj-zone">Zone</label><SearchSelect id="fj-zone" v-model="fiche.zone" :options="[{ value: '', label: 'Toutes les zones' }, { value: 'abidjan', label: 'Abidjan' }, { value: 'interieur', label: 'Intérieur du pays' }, { value: 'exterieur', label: 'Extérieur' }]" /></div>
+        </div>
+        <div v-if="fiche.apercu?.livreurs.length" class="field"><label for="fj-livreur">Livreur</label><SearchSelect id="fj-livreur" v-model="fiche.livreur" :options="[{ value: '', label: 'Tous les livreurs' }, ...fiche.apercu.livreurs.map((l) => ({ value: l.nom, label: `${l.nom} (${l.nb})` }))]" /></div>
+
+        <div class="bilan" :aria-busy="fiche.charge" aria-live="polite">
+          <template v-if="ficheChiffres">
+            <div><b>{{ ficheChiffres.nb }}</b><span>commande{{ ficheChiffres.nb > 1 ? 's' : '' }}</span></div>
+            <div><b>{{ money(ficheChiffres.montant) }}</b><span>à encaisser</span></div>
+            <p v-if="!fiche.livreur && (ficheChiffres.retards || ficheChiffres.livrees)" class="muted">
+              <template v-if="ficheChiffres.retards">Dont {{ ficheChiffres.retards }} en retard des jours précédents. </template>
+              <template v-if="ficheChiffres.livrees">{{ ficheChiffres.livrees }} déjà livrée{{ ficheChiffres.livrees > 1 ? 's' : '' }}.</template>
+            </p>
+          </template>
+          <div v-else-if="fiche.charge" class="skeleton" style="height:44px;grid-column:1/-1" />
+        </div>
+
+        <div class="row">
+          <button type="button" class="btn" :disabled="fiche.busy" @click="fiche.ouvert = false">Fermer</button>
+          <button class="btn primary" :disabled="fiche.busy || fiche.charge || !ficheChiffres?.nb"><Icon name="printer" :size="16" /> {{ fiche.busy ? 'Préparation…' : ficheChiffres && !ficheChiffres.nb ? 'Aucune commande ce jour' : 'Ouvrir le PDF' }}</button>
+        </div>
+      </form>
     </div>
 
     <!-- ===== Annulation ===== -->
@@ -294,5 +377,14 @@ tr.cancelled td { opacity: .6; }
 .pl { display: grid; gap: 6px; margin-bottom: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 14px; } .pl label { font-weight: 700; }
 .recap { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; } .sum { display: flex; justify-content: space-between; }
 .recap .change { font-size: 20px; color: var(--success); } .recap .credit { font-size: 18px; color: var(--danger); } .warn { margin: 0; color: var(--danger); font-size: 13px; }
-@media (max-width: 560px) { .infos { grid-template-columns: 1fr; } }
+.tete-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.modal.fiche { width: min(500px, calc(100% - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; display: grid; gap: 12px; }
+.fiche h3, .fiche > p { margin: 0; }
+.jour { display: flex; flex-wrap: wrap; gap: 8px; } .jour .input { flex: 1 1 160px; }
+.fiche .two { margin: 0; }
+.bilan { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; min-height: 44px; }
+.bilan > div { display: flex; flex-direction: column; padding: 10px 14px; border-radius: 14px; background: var(--surface-2); }
+.bilan b { font-size: 20px; } .bilan span { color: var(--muted); font-size: 13px; }
+.bilan p { grid-column: 1 / -1; margin: 0; font-size: 13px; }
+@media (max-width: 560px) { .infos, .two { grid-template-columns: 1fr; } }
 </style>

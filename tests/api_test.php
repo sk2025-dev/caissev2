@@ -370,6 +370,11 @@ list($c, $j) = $k->call('GET', 'commandes', ['statut' => 'actives']); check('lis
 list($c, $j) = $k->call('GET', 'commandes', ['q' => 'Cocody']); check('recherche par adresse ou commune', $j['meta']['total'] === 1);
 list($c, $j) = $k->call('GET', 'commandes', ['zone' => 'abidjan']); check('filtre par zone', $j['meta']['total'] === 1);
 list($c, $j) = $k->call('GET', 'commandes', ['zone' => 'interieur']); check('filtre par zone : intérieur vide', $j['meta']['total'] === 0);
+list($c, $j) = $k->call('GET', 'commandes-jour'); check('fiche du jour : aperçu (livrée comptée, rien à encaisser, livreur listé)', $c === 200 && $j['resume']['nb'] === 1 && $j['resume']['livrees'] === 1 && (float)$j['resume']['a_encaisser'] === 0.0 && $j['resume']['livreurs'][0]['nom'] === 'Moussa', json_encode($j));
+list($c, $j) = $k->call('GET', 'commandes-jour', ['mode' => 'retrait']); check('fiche du jour : commande annulée exclue', $c === 200 && $j['resume']['nb'] === 0);
+list($c, $j, $raw) = $k->call('GET', 'commandes-jour-pdf', ['livreur' => 'Moussa']); check('fiche du jour : PDF généré et journalisé', $c === 200 && strpos((string)$raw, '%PDF-') === 0 && (int)$pdo->query("SELECT COUNT(*) FROM audit_log WHERE module = 'commandes' AND action = 'export'")->fetchColumn() === 1);
+list($c) = $k->call('GET', 'commandes-jour-pdf', ['mode' => 'retrait']); check('fiche du jour vide -> 404', $c === 404);
+list($c, $j) = $k->call('GET', 'commandes-jour', ['date' => '2026-02-30']); check('fiche du jour : date invalide -> 422', $c === 422 && isset($j['errors']['date']));
 $stock0 = (float)$pdo->query("SELECT stock_qty FROM produits WHERE idprod = $jus")->fetchColumn();
 $nbCmdAvant = (int)$pdo->query('SELECT COUNT(*) FROM commandes')->fetchColumn();
 list($c, $j) = $a->call('POST', 'commande-creer', [], ['mode' => 'retrait', 'client_nom' => 'Rupture', 'lignes' => [['idprod' => $jus, 'quantite' => 9999]]]);

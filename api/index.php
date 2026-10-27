@@ -3,7 +3,7 @@
  * API JSON — point d'entrée unique.   GET/POST/DELETE  api/index.php?r=<route>[&id=N]
  *   auth/* · public-config · dashboard · dashboard-mensuel · lookups · search · alertes · exports · config*
  *   caisse : pos-catalogue · mouvements-caisse · session-* · operation-caisse · depense-creer · categorie-mouvement-creer · justificatif · vente-creer · ventes · vente · vente-annuler · paniers
- *   commandes : commandes · commande · commande-creer · commande-statut · commande-livrer · commande-annuler
+ *   commandes : commandes · commande · commandes-jour · commandes-jour-pdf · commande-creer · commande-statut · commande-livrer · commande-annuler
  *   stock : stock-ajuster · inventaire · inventaires · mouvements-stock · stock-balance    achats : appro-creer · appros · appro · reglement-creer · reglements
  *   fiches : produit-detail · client-detail · fournisseur-detail    traçabilité : journal
  *   caisses : caisse-config (produits vendus, numérotation, ticket propres à chaque caisse)
@@ -220,6 +220,24 @@ switch ($r) {
     /* ---- Commandes et livraisons ---- */
     case 'commandes': json_out(commandes_liste($bdd, $user, $q));
     case 'commande': if (!$id) throw new ApiError(400, 'Identifiant requis'); json_out(['commande' => commande_detail($bdd, $user, $id)]);
+    case 'commandes-jour':   // aperçu de la fiche journalière (nombre, montant, livreurs)
+        $d = commandes_jour($bdd, $user, $q);
+        json_out(['date' => $d['date'], 'resume' => $d['resume']]);
+    case 'commandes-jour-pdf':
+        $d = commandes_jour($bdd, $user, $q);
+        if (!$d['commandes']) throw new ApiError(404, 'Aucune commande à livrer le ' . dfr($d['date']) . ' avec ces critères.');
+        $fichier = tempnam(export_dir(), 'liv');
+        commandes_jour_pdf($d, doc_contexte($reglages, !empty($user['nom']) ? $user['nom'] : $user['email']), $fichier);
+        journaliser($bdd, $user, 'export', 'commandes', null, 'Fiche de livraison du ' . dfr($d['date']) . " ({$d['resume']['nb']} commande(s))", array_filter(['mode' => $d['mode'], 'zone' => $d['zone'], 'livreur' => $d['livreur']], 'strlen'));
+        session_write_close();
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: inline; filename="livraisons-' . $d['date'] . '.pdf"');
+        header('Content-Length: ' . filesize($fichier));
+        header('Cache-Control: private, no-store');
+        header('X-Content-Type-Options: nosniff');
+        readfile($fichier);
+        @unlink($fichier);
+        exit;
     case 'commande-creer':
         $post();
         $c = commande_creer($bdd, $user, $corps);

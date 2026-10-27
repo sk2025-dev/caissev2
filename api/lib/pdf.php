@@ -15,10 +15,14 @@ class Pdf
     private static function color($hex) { return sprintf('%.3f %.3f %.3f', hexdec(substr($hex, 0, 2)) / 255, hexdec(substr($hex, 2, 2)) / 255, hexdec(substr($hex, 4, 2)) / 255); }
 
     /** Largeur approchée d'un texte Helvetica (chiffres, espaces et ponctuation exacts ; lettres moyennées). */
-    public static function width($s, $size, $bold = false)
+    public static function width($s, $size, $bold = false) { return self::largeur(self::latin($s), $size, $bold); }
+
+    /** Même calcul sur un texte déjà converti en Windows-1252 (un octet par caractère). */
+    private static function largeur($s, $size, $bold)
     {
         $w = 0;
-        foreach (preg_split('//u', self::latin($s), -1, PREG_SPLIT_NO_EMPTY) as $ch) {
+        if ($s === '') return 0;
+        foreach (str_split($s) as $ch) {
             if (ctype_digit($ch)) $w += 556;
             elseif (strpos(" ,.:;/!", $ch) !== false) $w += 278;
             elseif (strpos("-()", $ch) !== false) $w += 333;
@@ -47,9 +51,9 @@ class Pdf
     {
         $s = self::latin($s);
         if ($boxW) {   // tronque proprement si le texte dépasse la cellule
-            while ($s !== '' && self::width($s, $size, $bold) > $boxW) $s = substr($s, 0, -1);
+            while ($s !== '' && self::largeur($s, $size, $bold) > $boxW) $s = substr($s, 0, -1);
         }
-        $w = self::width($s, $size, $bold);
+        $w = self::largeur($s, $size, $bold);
         if ($align === 'R') $x = $x + $boxW - $w; elseif ($align === 'C') $x = $x + ($boxW - $w) / 2;
         $esc = str_replace(['\\', '(', ')'], ['\\\\', '\\(', '\\)'], $s);
         $this->pages[$this->cur] .= sprintf("BT /%s %.2f Tf %s rg %.2f %.2f Td (%s) Tj ET\n", $bold ? 'F2' : 'F1', $size, self::color($hex), $x, self::H - $y, $esc);
