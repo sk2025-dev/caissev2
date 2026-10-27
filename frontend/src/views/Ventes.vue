@@ -6,6 +6,7 @@ import { lookups, loadLookups } from '../lookups'
 import { money, dateHeure } from '../format'
 import { toast } from '../toast'
 import Icon from '../components/Icon.vue'
+import Fenetre from '../components/Fenetre.vue'
 import SearchSelect from '../components/SearchSelect.vue'
 import Pager from '../components/Pager.vue'
 import Ticket from '../components/Ticket.vue'
@@ -97,26 +98,22 @@ const badge = (r) => (r.statut === 'annulee' ? ['danger', 'Annulée'] : Number(r
       <Pager :meta="meta" @goto="goto" />
     </div>
 
-    <div v-if="detail" class="overlay center" @click.self="detail = null" @keydown.esc="detail = null">
-      <div class="modal" role="dialog" aria-modal="true" :aria-label="`Vente ${detail.numero}`" style="width:min(460px,calc(100% - 32px));max-height:calc(100vh - 32px);display:flex;flex-direction:column">
-        <div style="overflow-y:auto;background:var(--surface-2);border-radius:16px;padding:4px"><Ticket :vente="detail" /></div>
+    <Fenetre v-if="detail" :titre="`Vente ${detail.numero}`" :sous-titre="detail.statut === 'annulee' ? 'Vente annulée' : ''" icone="receipt" :largeur="460" @close="detail = null">
+        <div class="ticket-fond"><Ticket :vente="detail" /></div>
         <p v-if="detail.statut === 'annulee'" class="muted" style="margin:10px 0 0;font-size:13px">Annulée : {{ detail.annule_motif }}</p>
-        <div class="row">
-          <button class="btn" @click="detail = null">Fermer</button>
+        <template #pied>
           <button v-if="isAdmin && detail.statut === 'validee'" class="btn danger" @click="Object.assign(annul, { ouvert: true, motif: '', erreur: '' })">Annuler la vente</button>
+          <span class="grow" />
+          <button class="btn" @click="detail = null">Fermer</button>
           <button class="btn primary" @click="imprimer"><Icon name="printer" :size="16" /> Imprimer</button>
-        </div>
-      </div>
-    </div>
+        </template>
+    </Fenetre>
 
-    <div v-if="annul.ouvert" class="overlay center" style="z-index:70" @click.self="annul.ouvert = false" @keydown.esc.stop="annul.ouvert = false">
-      <form class="modal" novalidate @submit.prevent="annuler">
-        <h3>Annuler la vente {{ detail.numero }} ?</h3>
-        <p class="muted">Le stock est remis en rayon et, pour une vente à crédit, la dette du client est reprise. Possible tant que la caisse n'est pas clôturée.</p>
+    <Fenetre v-if="annul.ouvert" :titre="`Annuler la vente ${detail.numero} ?`" icone="alert" largeur="sm" formulaire alerte :reductible="false" :occupe="annul.busy" @close="annul.ouvert = false" @submit="annuler">
+        <p class="muted" style="margin-top:0">Le stock est remis en rayon et, pour une vente à crédit, la dette du client est reprise. Possible tant que la caisse n'est pas clôturée.</p>
         <div class="field" :class="{ invalid: annul.erreur }"><label for="a-m">Motif <span class="req">*</span></label><input id="a-m" v-model="annul.motif" class="input" maxlength="200" autofocus /><span v-if="annul.erreur" class="error">{{ annul.erreur }}</span></div>
-        <div class="row"><button type="button" class="btn" @click="annul.ouvert = false">Retour</button><button class="btn danger" :disabled="annul.busy">{{ annul.busy ? 'Annulation…' : 'Annuler la vente' }}</button></div>
-      </form>
-    </div>
+        <template #pied><button type="button" class="btn" :disabled="annul.busy" @click="annul.ouvert = false">Retour</button><button class="btn danger" :disabled="annul.busy">{{ annul.busy ? 'Annulation…' : 'Annuler la vente' }}</button></template>
+    </Fenetre>
   </main>
 </template>
 

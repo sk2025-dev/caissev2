@@ -8,6 +8,7 @@ import SearchSelect from './SearchSelect.vue'
 import QuickCreate from './QuickCreate.vue'
 import PhoneInput from './PhoneInput.vue'
 import FileDrop from './FileDrop.vue'
+import Fenetre from './Fenetre.vue'
 import { phoneIssue, parsePhone, toValue } from '../phone'
 
 const props = defineProps({ config: Object, route: String, idKey: String, row: { type: Object, default: null } })
@@ -92,16 +93,9 @@ const title = computed(() => (editing.value ? `Modifier ${props.config.singular}
 </script>
 
 <template>
-  <!-- Rendu au niveau de la page : un parent animé (transform) enfermerait sinon le tiroir dans son cadre -->
-  <Teleport to="body">
-  <div class="overlay" @click.self="emit('close')" @keydown.esc="emit('close')">
-    <form class="drawer" novalidate role="dialog" aria-modal="true" :aria-label="title" @submit.prevent="submit">
-      <header>
-        <h2>{{ title }}</h2>
-        <button type="button" class="btn ghost icon" aria-label="Fermer" @click="emit('close')"><Icon name="x" /></button>
-      </header>
-
-      <div ref="first" class="body">
+  <!-- Fenetre est rendue au niveau de la page : un parent animé (transform) ne peut pas l'enfermer dans son cadre -->
+  <Fenetre :titre="title" :icone="editing ? 'edit' : 'plus'" :largeur="600" tiroir formulaire :occupe="saving" @close="emit('close')" @submit="submit">
+      <div ref="first" class="fen-grille">
         <div v-if="general" class="alert full">{{ general }}</div>
         <div v-for="f in fields" :key="f.name" class="field" :class="{ full: f.full || f.type === 'textarea', invalid: errors[f.name] }">
           <label :for="'f-' + f.name">{{ f.label }} <span v-if="isRequired(f)" class="req" aria-hidden="true">*</span></label>
@@ -132,12 +126,10 @@ const title = computed(() => (editing.value ? `Modifier ${props.config.singular}
         </div>
       </div>
 
-      <footer>
-        <button type="button" class="btn" @click="emit('close')">Annuler</button>
+      <template #pied>
+        <button type="button" class="btn" :disabled="saving" @click="emit('close')">Annuler</button>
         <button type="submit" class="btn primary" :disabled="saving">{{ saving ? 'Enregistrement…' : 'Enregistrer' }}</button>
-      </footer>
-    </form>
-    <QuickCreate v-if="quick" :spec="quick.field.create" :name="quick.name" @close="quick = null" @created="onQuickCreated" />
-  </div>
-  </Teleport>
+      </template>
+  </Fenetre>
+  <QuickCreate v-if="quick" :spec="quick.field.create" :name="quick.name" @close="quick = null" @created="onQuickCreated" />
 </template>

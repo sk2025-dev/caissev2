@@ -3,6 +3,7 @@
 // L'aperçu utilise un filtre CSS ; l'export recalcule chaque pixel en pleine résolution puis réduit à TAILLE_MAX (JPEG compressé).
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import Icon from './Icon.vue'
+import Fenetre from './Fenetre.vue'
 import { chargerImage, appliquerReglages, filtreCss, versFichier, nomJpeg, TAILLE_MAX } from '../images'
 
 const props = defineProps({
@@ -112,7 +113,7 @@ async function appliquer() {
   } catch (e) { erreur.value = e.message } finally { busy.value = false }
 }
 
-function touche(e) { if (e.key === 'Escape') emit('close') }
+function touche(e) { if (e.key === 'Escape' && !busy.value) emit('close') }
 onMounted(async () => {
   window.addEventListener('keydown', touche)
   window.addEventListener('resize', rafraichir)
@@ -122,10 +123,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', touche); window.re
 </script>
 
 <template>
-  <Teleport to="body">
-  <div class="overlay center editeur-fond" @click.self="emit('close')">
-    <div class="modal editeur" role="dialog" aria-modal="true" aria-label="Retoucher la photo">
-      <header><h3><Icon name="sliders" :size="18" /> Retoucher la photo</h3><button type="button" class="btn ghost icon" aria-label="Fermer" @click="emit('close')"><Icon name="x" /></button></header>
+  <Fenetre titre="Retoucher la photo" sous-titre="Recadrage, orientation et réglages" icone="sliders" :largeur="1080" plein :reductible="false" :occupe="busy" @close="emit('close')" @redimension="rafraichir">
       <div class="corps">
         <div ref="scene" class="scene">
           <div v-if="erreur" class="alert">{{ erreur }}</div>
@@ -165,25 +163,16 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', touche); window.re
           <small class="muted">Photo enregistrée : {{ sortie }}, JPEG compressé.</small>
         </aside>
       </div>
-      <footer>
+      <template #pied>
         <button type="button" class="btn ghost" :disabled="!modifie" @click="reinitialiser"><Icon name="history" :size="15" /> Réinitialiser</button>
         <span class="grow" />
-        <button type="button" class="btn" @click="emit('close')">Annuler</button>
+        <button type="button" class="btn" :disabled="busy" @click="emit('close')">Annuler</button>
         <button type="button" class="btn primary" :disabled="!img || busy" @click="appliquer"><Icon name="check" :size="16" /> {{ busy ? 'Traitement…' : 'Appliquer' }}</button>
-      </footer>
-    </div>
-  </div>
-  </Teleport>
+      </template>
+  </Fenetre>
 </template>
 
 <style scoped>
-.editeur-fond { z-index: 80; }
-.editeur { width: min(1080px, calc(100vw - 24px)); max-height: calc(100vh - 24px); display: flex; flex-direction: column; padding: 0; overflow: hidden; }
-.editeur header, .editeur footer { display: flex; align-items: center; gap: 10px; padding: 12px 16px; }
-.editeur header { justify-content: space-between; border-bottom: 1px solid var(--border); }
-.editeur header h3 { display: flex; align-items: center; gap: 8px; margin: 0; }
-.editeur footer { border-top: 1px solid var(--border); }
-.grow { flex: 1; }
 .corps { display: grid; grid-template-columns: 1fr 270px; min-height: 0; flex: 1; }
 .scene { height: min(560px, calc(100vh - 190px)); display: grid; place-items: center; padding: 4px; background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--surface) 0 50%) 0 0 / 22px 22px; overflow: hidden; }
 .toile { position: relative; touch-action: none; user-select: none; overflow: hidden; }

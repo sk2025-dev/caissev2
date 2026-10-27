@@ -128,20 +128,31 @@ list($c) = $k->call('GET', 'fournisseurs'); check('caissier : fournisseurs inacc
 list($c, $j) = $m->call('POST', 'fournisseurs', [], ['nom' => 'Mauvais tel', 'telephone' => '0707']); check('téléphone sans indicatif -> 422', $c === 422);
 $pdo->exec("UPDATE produits SET prix_achat = 300, stock_qty = 100 WHERE idprod = $eau");
 list($c, $j) = $m->call('POST', 'appro-creer', [], ['idfour' => $four, 'numero_bon' => 'BL-778', 'date_appro' => $today, 'paye' => 20000, 'mode' => 'especes', 'lignes' => [['idprod' => $eau, 'quantite' => 100, 'cout_unitaire' => 400], ['idprod' => $riz, 'quantite' => 10, 'cout_unitaire' => 3200]]]);
-check('réception : numéro, total, reste dû', $c === 201 && preg_match('/^AP-\d{4}-000001$/', $j['appro']['numero']) && $j['appro']['total'] == 72000 && $j['appro']['reste'] == 52000, json_encode($j));
+check('réception : numéro et total, sans fournisseur ni paiement (confidentialité)', $c === 201 && preg_match('/^AP-\d{4}-000001$/', $j['appro']['numero']) && $j['appro']['total'] == 72000 && !array_key_exists('fournisseur', $j['appro']) && !array_key_exists('idfour', $j['appro']) && !array_key_exists('reste', $j['appro']), json_encode($j));
 $q = $pdo->query("SELECT stock_qty, prix_achat FROM produits WHERE idprod = $eau")->fetch(PDO::FETCH_ASSOC);
 check('stock augmenté et coût moyen pondéré recalculé ((100×300 + 100×400) / 200 = 350)', (float)$q['stock_qty'] === 200.0 && (float)$q['prix_achat'] === 350.0, json_encode($q));
-check('dette fournisseur et règlement initial enregistrés', (float)$pdo->query("SELECT solde FROM fournisseurs WHERE idfour = $four")->fetchColumn() === 52000.0 && (int)$pdo->query("SELECT COUNT(*) FROM reglements WHERE tiers_type = 'fournisseur' AND montant = 20000")->fetchColumn() === 1);
-list($c, $j) = $m->call('POST', 'appro-creer', [], ['idfour' => $four, 'paye' => 999999, 'lignes' => [['idprod' => $eau, 'quantite' => 1, 'cout_unitaire' => 10]]]); check('paiement supérieur au total -> 422', $c === 422 && isset($j['errors']['paye']));
-list($c) = $m->call('POST', 'appro-creer', [], ['idfour' => 99999, 'lignes' => [['idprod' => $eau, 'quantite' => 1, 'cout_unitaire' => 10]]]); check('fournisseur inconnu -> 422', $c === 422);
-list($c) = $m->call('POST', 'appro-creer', [], ['idfour' => $four, 'lignes' => [['idprod' => $livraison, 'quantite' => 1, 'cout_unitaire' => 10]]]); check('réception d\'un service refusée -> 422', $c === 422);
-list($c) = $m->call('POST', 'appro-creer', [], ['idfour' => $four, 'lignes' => []]); check('réception sans ligne -> 422', $c === 422);
+check('réception non rattachée : aucun fournisseur en base, aucune dette ni paiement créés', $pdo->query('SELECT idfour FROM approvisionnements ORDER BY idappro DESC LIMIT 1')->fetchColumn() === null && (float)$pdo->query("SELECT solde FROM fournisseurs WHERE idfour = $four")->fetchColumn() === 0.0 && (int)$pdo->query("SELECT COUNT(*) FROM reglements WHERE tiers_type = 'fournisseur'")->fetchColumn() === 0);
+list($c) = $m->call('POST', 'appro-creer', [], ['lignes' => [['idprod' => $livraison, 'quantite' => 1, 'cout_unitaire' => 10]]]); check('réception d\'un service refusée -> 422', $c === 422);
+list($c) = $m->call('POST', 'appro-creer', [], ['lignes' => []]); check('réception sans ligne -> 422', $c === 422);
 check('une réception refusée ne modifie aucun stock (transaction)', (float)$pdo->query("SELECT stock_qty FROM produits WHERE idprod = $eau")->fetchColumn() === 200.0);
-list($c) = $k->call('POST', 'appro-creer', [], ['idfour' => $four, 'lignes' => [['idprod' => $eau, 'quantite' => 1, 'cout_unitaire' => 10]]]); check('caissier : réception refusée', $c === 403);
+list($c) = $k->call('POST', 'appro-creer', [], ['lignes' => [['idprod' => $eau, 'quantite' => 1, 'cout_unitaire' => 10]]]); check('caissier : réception refusée', $c === 403);
+list($c, $j) = $m->call('GET', 'appros', ['q' => 'BL-778']); check('liste des réceptions : sans fournisseur ni paiement', $j['meta']['total'] === 1 && $j['data'][0]['nb_lignes'] === 2 && !array_key_exists('fournisseur', $j['data'][0]) && !array_key_exists('idfour', $j['data'][0]) && !array_key_exists('paye', $j['data'][0]));
+// Ce qu'on doit au fournisseur vient de ses factures, saisies sur sa fiche
+list($c, $j) = $m->call('POST', 'facture-fournisseur', [], ['idfour' => $four, 'montant' => 52000, 'reference' => 'FAC-778', 'date_facture' => $today]); check('facture fournisseur : dette enregistrée', $c === 201 && $j['facture']['solde'] == 52000, json_encode($j));
+list($c, $j) = $m->call('POST', 'facture-fournisseur', [], ['idfour' => $four, 'montant' => 0]); check('facture sans montant -> 422', $c === 422 && isset($j['errors']['montant']));
+list($c, $j) = $m->call('POST', 'facture-fournisseur', [], ['idfour' => $four, 'montant' => 100, 'date_facture' => '2999-01-01']); check('facture datée dans le futur -> 422', $c === 422 && isset($j['errors']['date_facture']));
+list($c) = $m->call('POST', 'facture-fournisseur', [], ['idfour' => 99999, 'montant' => 100]); check('facture d\'un fournisseur inconnu -> 404', $c === 404);
+list($c) = $k->call('POST', 'facture-fournisseur', [], ['idfour' => $four, 'montant' => 100]); check('caissier : facture fournisseur refusée', $c === 403);
+list($c, $j) = $m->call('POST', 'facture-fournisseur', [], ['idfour' => $four, 'montant' => 5000, 'reference' => 'ERREUR']); $facErr = $j['facture']['idfacture'];
+list($c) = $m->call('DELETE', 'facture-fournisseur', ['id' => $facErr]); check('magasinier : retrait de facture refusé', $c === 403);
+list($c) = $a->call('DELETE', 'facture-fournisseur', ['id' => $facErr]); check('gérant : facture erronée retirée, dette corrigée', $c === 200 && (float)$pdo->query("SELECT solde FROM fournisseurs WHERE idfour = $four")->fetchColumn() === 52000.0);
 list($c, $j) = $m->call('POST', 'reglement-creer', [], ['tiers_type' => 'fournisseur', 'tiers_id' => $four, 'montant' => 60000, 'mode' => 'especes']); check('règlement supérieur à la dette -> 422', $c === 422 && isset($j['errors']['montant']));
 list($c, $j) = $m->call('POST', 'reglement-creer', [], ['tiers_type' => 'fournisseur', 'tiers_id' => $four, 'montant' => 12000, 'mode' => 'orange']); check('règlement partiel de la dette', $c === 201 && $j['reglement']['solde'] == 40000, json_encode($j));
-list($c, $j) = $m->call('GET', 'appros', ['idfour' => $four]); check('liste des réceptions', $j['meta']['total'] === 1 && $j['data'][0]['nb_lignes'] === 2);
-list($c, $j) = $m->call('GET', 'fournisseur-detail', ['id' => $four]); check('fiche fournisseur : solde, réceptions, règlements', $j['fournisseur']['solde'] == 40000 && count($j['appros']) === 1 && count($j['reglements']) === 2);
+list($c, $j) = $m->call('GET', 'fournisseur-detail', ['id' => $four]); check('fiche fournisseur : solde, factures, règlements, aucune réception', $j['fournisseur']['solde'] == 40000 && count($j['factures']) === 1 && $j['fournisseur']['total_achats'] == 52000 && count($j['reglements']) === 1 && !isset($j['appros']), json_encode($j));
+list($c, $j) = $m->call('POST', 'facture-fournisseur', [], ['idfour' => $four, 'montant' => 1000]); $facPayee = $j['facture']['idfacture'];
+$pdo->exec("UPDATE fournisseurs SET solde = 500 WHERE idfour = $four");
+list($c) = $a->call('DELETE', 'facture-fournisseur', ['id' => $facPayee]); check('facture déjà réglée : retrait refusé', $c === 409);
+$pdo->exec("UPDATE fournisseurs SET solde = 40000 WHERE idfour = $four"); $pdo->exec("UPDATE fournisseur_factures SET supp = 1 WHERE idfacture = $facPayee");
 list($c, $j) = $m->call('GET', 'produit-detail', ['id' => $eau]); check('fiche produit : mouvements et ventes sur 30 jours', $c === 200 && count($j['mouvements']) >= 3 && $j['ventes_30j']['qte'] == 0, json_encode($j['ventes_30j'] ?? null));
 
 

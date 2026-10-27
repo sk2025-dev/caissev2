@@ -12,6 +12,7 @@ import Pager from '../components/Pager.vue'
 import CommandeForm from '../components/CommandeForm.vue'
 import FicheLivraison from '../components/FicheLivraison.vue'
 import Ticket from '../components/Ticket.vue'
+import Fenetre from '../components/Fenetre.vue'
 
 const ZONE_COURTE = { abidjan: 'Abidjan', interieur: 'Intérieur', exterieur: 'Extérieur' }
 const peutCreer = computed(() => !!auth.user?.droits?.commandes_ecriture)
@@ -202,12 +203,8 @@ const nomEtape = (s) => ({ ...{ livree: detail.value?.mode === 'retrait' ? 'Reti
     <CommandeForm v-if="creation" @close="creation = false" @created="creee" />
 
     <!-- ===== Détail ===== -->
-    <div v-if="detail" class="overlay center" @click.self="detail = null; vente = null" @keydown.esc="detail = null; vente = null">
-      <div class="modal det" role="dialog" aria-modal="true" :aria-label="`Commande ${detail.numero}`">
-        <header>
-          <div><h3>{{ detail.numero }}</h3><span class="muted">{{ detail.mode === 'livraison' ? 'Livraison à domicile' : 'Retrait en boutique' }} · prise par {{ detail.createur }}</span></div>
-          <span class="badge lg" :class="STATUTS[detail.statut]?.cls">{{ libelleStatut(detail) }}</span>
-        </header>
+    <Fenetre v-if="detail" :titre="`Commande ${detail.numero}`" :sous-titre="`${detail.mode === 'livraison' ? 'Livraison à domicile' : 'Retrait en boutique'} · prise par ${detail.createur}`" icone="truck" :largeur="680" @close="detail = null; vente = null">
+        <template #entete><span class="badge lg" :class="STATUTS[detail.statut]?.cls">{{ libelleStatut(detail) }}</span></template>
 
         <ol v-if="detail.statut !== 'annulee'" class="etapes" aria-label="Avancement">
           <li v-for="(s, i) in detail.sequence" :key="s" :class="{ fait: i < etapeIdx || detail.statut === 'livree', actif: i === etapeIdx && detail.statut !== 'livree' }"><span class="pt"><Icon v-if="i < etapeIdx || detail.statut === 'livree'" name="check" :size="12" /></span>{{ nomEtape(s) }}</li>
@@ -236,24 +233,22 @@ const nomEtape = (s) => ({ ...{ livree: detail.value?.mode === 'retrait' ? 'Reti
 
         <div v-if="chercherLivreur" class="field livreur"><label for="d-liv">Qui livre ? <span class="req">*</span></label><input id="d-liv" v-model="livreur" class="input" maxlength="80" placeholder="Nom du livreur" autofocus @keydown.enter.prevent="avancer('en_livraison')" /></div>
 
-        <div class="row">
-          <button class="btn" @click="detail = null; vente = null">Fermer</button>
+        <p v-if="action?.statut === 'livree' && !peutEncaisser" class="muted" style="margin:12px 0 0;font-size:13px">L'encaissement se fait par un caissier ou le gérant.</p>
+
+        <FicheLivraison v-if="!vente && !ticketCommande" :commande="detail" />
+
+        <template #pied>
           <button class="btn" @click="ticketCommande = detail"><Icon name="printer" :size="16" /> Ticket de commande</button>
           <button class="btn" @click="imprimer"><Icon name="printer" :size="16" /> {{ detail.mode === 'livraison' ? 'Fiche de livraison' : 'Bon de retrait' }}</button>
           <button v-if="peutCreer && !finale(detail)" class="btn danger" @click="Object.assign(annul, { ouvert: true, motif: '', erreur: '' })">Annuler</button>
           <button v-if="action && (action.statut === 'livree' ? peutEncaisser : peutStatut)" class="btn primary" :disabled="busy" @click="principale"><Icon :name="action.statut === 'livree' ? 'cash' : 'check'" :size="16" /> {{ chercherLivreur && action.statut === 'en_livraison' ? 'Confirmer le départ' : action.libelle }}</button>
-        </div>
-        <p v-if="action?.statut === 'livree' && !peutEncaisser" class="muted" style="margin:8px 0 0;font-size:13px">L'encaissement se fait par un caissier ou le gérant.</p>
-
-        <FicheLivraison v-if="!vente && !ticketCommande" :commande="detail" />
-      </div>
-    </div>
+        </template>
+    </Fenetre>
 
     <!-- ===== Fiche de livraison du jour ===== -->
-    <div v-if="fiche.ouvert" class="overlay center" @click.self="!fiche.busy && (fiche.ouvert = false)" @keydown.esc="fiche.ouvert = false">
-      <form class="modal fiche" role="dialog" aria-modal="true" aria-labelledby="fj-titre" novalidate @submit.prevent="imprimerFiche">
-        <h3 id="fj-titre">Fiche de livraison du jour</h3>
-        <p class="muted">Un PDF à imprimer ou à remettre au livreur : clients, lieux, articles, montants à encaisser et une case de signature.</p>
+    <Fenetre v-if="fiche.ouvert" titre="Fiche de livraison du jour" sous-titre="PDF à imprimer ou à remettre au livreur" icone="printer" :largeur="520" formulaire :occupe="fiche.busy" @close="fiche.ouvert = false" @submit="imprimerFiche">
+      <div class="fiche">
+        <p class="muted">Clients, lieux, articles, montants à encaisser et une case de signature pour chaque commande.</p>
         <div class="field">
           <label for="fj-date">Jour</label>
           <div class="jour">
@@ -279,27 +274,22 @@ const nomEtape = (s) => ({ ...{ livree: detail.value?.mode === 'retrait' ? 'Reti
           <div v-else-if="fiche.charge" class="skeleton" style="height:44px;grid-column:1/-1" />
         </div>
 
-        <div class="row">
-          <button type="button" class="btn" :disabled="fiche.busy" @click="fiche.ouvert = false">Fermer</button>
-          <button class="btn primary" :disabled="fiche.busy || fiche.charge || !ficheChiffres?.nb"><Icon name="printer" :size="16" /> {{ fiche.busy ? 'Préparation…' : ficheChiffres && !ficheChiffres.nb ? 'Aucune commande ce jour' : 'Ouvrir le PDF' }}</button>
-        </div>
-      </form>
-    </div>
+      </div>
+      <template #pied>
+        <button type="button" class="btn" :disabled="fiche.busy" @click="fiche.ouvert = false">Fermer</button>
+        <button class="btn primary" :disabled="fiche.busy || fiche.charge || !ficheChiffres?.nb"><Icon name="printer" :size="16" /> {{ fiche.busy ? 'Préparation…' : ficheChiffres && !ficheChiffres.nb ? 'Aucune commande ce jour' : 'Ouvrir le PDF' }}</button>
+      </template>
+    </Fenetre>
 
     <!-- ===== Annulation ===== -->
-    <div v-if="annul.ouvert" class="overlay center" style="z-index:70" @click.self="annul.ouvert = false" @keydown.esc.stop="annul.ouvert = false">
-      <form class="modal" novalidate @submit.prevent="annuler">
-        <h3>Annuler la commande {{ detail.numero }} ?</h3>
-        <p class="muted">{{ Number(detail.stock_debite) ? 'Les articles déduits à la prise de commande seront automatiquement remis en stock.' : 'Aucun article n’a encore été déduit du stock pour cette commande.' }}</p>
+    <Fenetre v-if="annul.ouvert" :titre="`Annuler la commande ${detail.numero} ?`" icone="alert" largeur="sm" formulaire alerte :reductible="false" :occupe="annul.busy" @close="annul.ouvert = false" @submit="annuler">
+        <p class="muted" style="margin-top:0">{{ Number(detail.stock_debite) ? 'Les articles déduits à la prise de commande seront automatiquement remis en stock.' : 'Aucun article n’a encore été déduit du stock pour cette commande.' }}</p>
         <div class="field" :class="{ invalid: annul.erreur }"><label for="a-m">Motif <span class="req">*</span></label><input id="a-m" v-model="annul.motif" class="input" maxlength="200" autofocus /><span v-if="annul.erreur" class="error">{{ annul.erreur }}</span></div>
-        <div class="row"><button type="button" class="btn" @click="annul.ouvert = false">Retour</button><button class="btn danger" :disabled="annul.busy">{{ annul.busy ? 'Annulation…' : 'Annuler la commande' }}</button></div>
-      </form>
-    </div>
+        <template #pied><button type="button" class="btn" :disabled="annul.busy" @click="annul.ouvert = false">Retour</button><button class="btn danger" :disabled="annul.busy">{{ annul.busy ? 'Annulation…' : 'Annuler la commande' }}</button></template>
+    </Fenetre>
 
     <!-- ===== Encaissement à la remise ===== -->
-    <div v-if="pay.ouvert" class="overlay center" style="z-index:70" @click.self="!pay.busy && (pay.ouvert = false)" @keydown.esc.stop="pay.ouvert = false">
-      <div class="modal pay" role="dialog" aria-modal="true" aria-label="Encaissement">
-        <h3>{{ detail.mode === 'livraison' ? 'Encaisser la livraison' : 'Encaisser le retrait' }}</h3>
+    <Fenetre v-if="pay.ouvert" :titre="detail.mode === 'livraison' ? 'Encaisser la livraison' : 'Encaisser le retrait'" :sous-titre="`Commande ${detail.numero} · ${detail.client_nom}`" icone="cash" :largeur="480" :occupe="pay.busy" @close="pay.ouvert = false">
         <div class="due"><span>À encaisser</span><b>{{ money(total) }}</b></div>
         <div class="modes"><button v-for="m in lookups.modes" :key="m.code" type="button" class="chip" :class="{ on: pay.lignes.some((l) => l.mode === m.code) }" @click="basculerMode(m.code)">{{ m.libelle }}</button></div>
         <div v-for="l in pay.lignes" :key="l.mode" class="pl">
@@ -319,17 +309,14 @@ const nomEtape = (s) => ({ ...{ livree: detail.value?.mode === 'retrait' ? 'Reti
           <p v-if="exces > 0 && !rendu" class="warn">Le montant dépasse le total : seul un excédent en espèces peut être rendu.</p>
         </div>
         <div v-if="pay.erreur" class="alert" role="alert">{{ pay.erreur }}</div>
-        <div class="row"><button class="btn" :disabled="pay.busy" @click="pay.ouvert = false">Retour</button><button class="btn primary" :disabled="pay.busy || (exces > 0 && !rendu)" @click="livrer"><Icon name="check" :size="16" /> {{ pay.busy ? 'Enregistrement…' : 'Valider la remise' }}</button></div>
-      </div>
-    </div>
+        <template #pied><button class="btn" :disabled="pay.busy" @click="pay.ouvert = false">Retour</button><button class="btn primary" :disabled="pay.busy || (exces > 0 && !rendu)" @click="livrer"><Icon name="check" :size="16" /> {{ pay.busy ? 'Enregistrement…' : 'Valider la remise' }}</button></template>
+    </Fenetre>
 
     <!-- ===== Ticket de la vente créée ===== -->
-    <div v-if="vente || ticketCommande" class="overlay center" style="z-index:80" @click.self="vente = null; ticketCommande = null" @keydown.esc.stop="vente = null; ticketCommande = null">
-      <div class="modal" style="width:min(460px,calc(100% - 32px));max-height:calc(100vh - 32px);display:flex;flex-direction:column">
-        <div style="overflow-y:auto;background:var(--surface-2);border-radius:16px;padding:4px"><Ticket :vente="vente" :commande="ticketCommande" /></div>
-        <div class="row"><button class="btn" @click="vente = null; ticketCommande = null">Fermer</button><button class="btn primary" @click="imprimer"><Icon name="printer" :size="16" /> Imprimer le ticket</button></div>
-      </div>
-    </div>
+    <Fenetre v-if="vente || ticketCommande" :titre="vente ? `Ticket de la vente ${vente.numero}` : `Ticket de la commande ${ticketCommande.numero}`" icone="receipt" :largeur="460" @close="vente = null; ticketCommande = null">
+        <div class="ticket-fond"><Ticket :vente="vente" :commande="ticketCommande" /></div>
+        <template #pied><button class="btn" @click="vente = null; ticketCommande = null">Fermer</button><button class="btn primary" @click="imprimer"><Icon name="printer" :size="16" /> Imprimer le ticket</button></template>
+    </Fenetre>
   </main>
 </template>
 
@@ -344,12 +331,8 @@ const nomEtape = (s) => ({ ...{ livree: detail.value?.mode === 'retrait' ? 'Reti
 .retard { color: var(--danger); font-weight: 700; }
 tr.cancelled td { opacity: .6; }
 
-.det { width: min(640px, calc(100% - 24px)); max-height: calc(100vh - 24px); overflow-y: auto; }
-.det > .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); }
-.det > .row > .btn { min-height: 44px; }
-.det > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-.det h3 { margin: 0; } .badge.lg { font-size: 14px; padding: 6px 14px; }
-.etapes { list-style: none; display: flex; margin: 18px 0; padding: 0; }
+.badge.lg { font-size: 14px; padding: 6px 14px; flex: none; }
+.etapes { list-style: none; display: flex; margin: 0 0 18px; padding: 0; }
 .etapes li { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); position: relative; text-align: center; }
 .etapes li + li::before { content: ''; position: absolute; top: 10px; right: 50%; width: 100%; height: 3px; background: var(--border); z-index: 0; }
 .etapes li.fait + li::before, .etapes li.actif::before { background: var(--primary); }
@@ -369,8 +352,7 @@ tr.cancelled td { opacity: .6; }
 .zone-badge.interieur { background: var(--warning-soft); color: var(--warning); } .zone-badge.exterieur { background: var(--success-soft); color: var(--success); }
 .lieu { font-weight: 600; } .lieu-box span { display: block; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
-.modal.pay { width: min(480px, calc(100% - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; }
-.due { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 16px; border-radius: 16px; background: var(--surface-2); margin: 8px 0 14px; } .due b { font-size: 26px; }
+.due { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 16px; border-radius: 16px; background: var(--surface-2); margin: 0 0 14px; } .due b { font-size: 26px; }
 .modes { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 8px 16px; border-radius: 999px; font: inherit; font-weight: 600; font-size: 14px; cursor: pointer; }
 .chip.on { background: var(--primary); border-color: var(--primary); color: #fff; }
@@ -378,8 +360,8 @@ tr.cancelled td { opacity: .6; }
 .recap { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; } .sum { display: flex; justify-content: space-between; }
 .recap .change { font-size: 20px; color: var(--success); } .recap .credit { font-size: 18px; color: var(--danger); } .warn { margin: 0; color: var(--danger); font-size: 13px; }
 .tete-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.modal.fiche { width: min(500px, calc(100% - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; display: grid; gap: 12px; }
-.fiche h3, .fiche > p { margin: 0; }
+.fiche { display: grid; gap: 12px; }
+.fiche > p { margin: 0; }
 .jour { display: flex; flex-wrap: wrap; gap: 8px; } .jour .input { flex: 1 1 160px; }
 .fiche .two { margin: 0; }
 .bilan { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; min-height: 44px; }

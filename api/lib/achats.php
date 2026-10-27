@@ -1,5 +1,8 @@
 <?php
-/** Approvisionnements (réception de marchandises), coût moyen pondéré et règlements des clients / fournisseurs. */
+/**
+ * Approvisionnements (réception de marchandises), coût moyen pondéré, factures et règlements des fournisseurs, règlements des clients.
+ * Confidentialité : une réception n'est rattachée à aucun fournisseur. Ce qu'on doit à un fournisseur vient de ses factures.
+ */
 
 function numero_suivant(PDO $db, $cle, $prefixe)
 {
@@ -18,16 +21,12 @@ function modes_actifs(PDO $db)
 }
 
 /**
- * Réception de marchandises : augmente le stock, recalcule le coût d'achat moyen pondéré de chaque produit
- * (CMUP = (stock × coût actuel + quantité reçue × coût d'achat) / nouveau stock) et enregistre la dette fournisseur.
+ * Réception de marchandises : augmente le stock et recalcule le coût d'achat moyen pondéré de chaque produit
+ * (CMUP = (stock × coût actuel + quantité reçue × coût d'achat) / nouveau stock). Ni fournisseur, ni paiement, ni dette.
  */
 function appro_creer(PDO $db, array $user, array $in)
 {
     exiger($user, 'achats.ecrire', "Seul le magasinier ou le gérant peut enregistrer une réception.");
-    $idfour = (int)($in['idfour'] ?? 0);
-    $st = $db->prepare('SELECT * FROM fournisseurs WHERE idfour = :i AND supp = 0'); $st->execute(['i' => $idfour]);
-    $four = $st->fetch(PDO::FETCH_ASSOC);
-    if (!$four) throw new ApiError(422, 'Données invalides', ['idfour' => 'Choisissez un fournisseur']);
     $date = isset($in['date_appro']) && $in['date_appro'] !== '' ? (string)$in['date_appro'] : gmdate('Y-m-d');
     $d = DateTime::createFromFormat('Y-m-d', $date);
     if (!$d || $d->format('Y-m-d') !== $date || $date > gmdate('Y-m-d')) throw new ApiError(422, 'Données invalides', ['date_appro' => 'Date invalide']);
@@ -40,16 +39,11 @@ function appro_creer(PDO $db, array $user, array $in)
         $lignes[] = ['idprod' => $id, 'q' => nombre($l['quantite'] ?? '', 'lignes', 0.001), 'cout' => nombre($l['cout_unitaire'] ?? '', 'lignes', 0)];
     }
     $total = round(array_sum(array_map(function ($l) { return $l['q'] * $l['cout']; }, $lignes)), 2);
-    $paye = round(nombre($in['paye'] ?? 0, 'paye', 0), 2);
-    if ($paye > $total + 0.004) throw new ApiError(422, 'Données invalides', ['paye' => 'Le montant payé dépasse le total']);
-    $mode = (string)($in['mode'] ?? 'especes');
-    if ($paye > 0 && !isset(modes_actifs($db)[$mode])) throw new ApiError(422, 'Données invalides', ['mode' => 'Mode de paiement inconnu']);
 
-    return stock_transaction($db, function () use ($db, $user, $four, $date, $lignes, $total, $paye, $mode, $in) {
+    return stock_transaction($db, function () use ($db, $user, $date, $lignes, $total, $in) {
         $numero = numero_suivant($db, 'appro', 'AP');
-        $reste = round($total - $paye, 2);
-        $db->prepare('INSERT INTO approvisionnements (idfour, numero, numero_bon, date_appro, total, paye, reste, note, statut, iduser, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-            ->execute([$four['idfour'], $numero, mb_substr(trim((string)($in['numero_bon'] ?? '')), 0, 60), $date, $total, $paye, $reste, mb_substr(trim((string)($in['note'] ?? '')), 0, 300), 'recue', $user['id'], gmdate('Y-m-d H:i:s')]);
+        $db->prepare('INSERT INTO approvisionnements (idfour, numero, numero_bon, date_appro, total, paye, reste, note, statut, iduser, created_at) VALUES (NULL,?,?,?,?,0,0,?,?,?,?)')
+            ->execute([$numero, mb_substr(trim((string)($in['numero_bon'] ?? '')), 0, 60), $date, $total, mb_substr(trim((string)($in['note'] ?? '')), 0, 300), 'recue', $user['id'], gmdate('Y-m-d H:i:s')]);
         $idappro = (int)$db->lastInsertId();
 
         // Verrouillage dans l'ordre des identifiants (évite les blocages croisés), traitement dans l'ordre saisi
@@ -64,16 +58,15 @@ function appro_creer(PDO $db, array $user, array $in)
             $db->prepare('INSERT INTO appro_lignes (idappro, idprod, designation, quantite, cout_unitaire, total) VALUES (?,?,?,?,?,?)')->execute([$idappro, $p['idprod'], $p['nom'], $l['q'], $l['cout'], round($l['q'] * $l['cout'], 2)]);
             stock_bouger($db, $user['id'], $p, 'entree_achat', $l['q'], ['cout' => $l['cout'], 'ref_type' => 'appro', 'ref_id' => $idappro, 'motif' => 'Réception ' . $numero]);
         }
-        if ($reste > 0) $db->prepare('UPDATE fournisseurs SET solde = solde + ? WHERE idfour = ?')->execute([$reste, $four['idfour']]);
-        if ($paye > 0) $db->prepare('INSERT INTO reglements (tiers_type, tiers_id, montant, mode, reference, note, iduser, created_at) VALUES (?,?,?,?,?,?,?,?)')
-            ->execute(['fournisseur', $four['idfour'], $paye, $mode, $numero, 'Paiement à la réception', $user['id'], gmdate('Y-m-d H:i:s')]);
         return appro_detail($db, $idappro);
     });
 }
 
+const APPRO_CHAMPS = 'a.idappro, a.numero, a.numero_bon, a.date_appro, a.total, a.note, a.statut, a.created_at';   // jamais le fournisseur ni le paiement
+
 function appro_detail(PDO $db, $id)
 {
-    $st = $db->prepare("SELECT a.*, f.nom AS fournisseur, CONCAT(u.nomag, ' ', u.prenom) AS utilisateur FROM approvisionnements a JOIN fournisseurs f ON f.idfour = a.idfour LEFT JOIN users u ON u.id_user = a.iduser WHERE a.idappro = :i");
+    $st = $db->prepare('SELECT ' . APPRO_CHAMPS . ", CONCAT(u.nomag, ' ', u.prenom) AS utilisateur FROM approvisionnements a LEFT JOIN users u ON u.id_user = a.iduser WHERE a.idappro = :i");
     $st->execute(['i' => $id]);
     $a = $st->fetch(PDO::FETCH_ASSOC);
     if (!$a) throw new ApiError(404, 'Réception introuvable');
@@ -86,17 +79,62 @@ function appro_detail(PDO $db, $id)
 function appros_liste(PDO $db, array $q)
 {
     $where = ['1=1']; $p = [];
-    if (!empty($q['idfour'])) { $where[] = 'a.idfour = :f'; $p['f'] = (int)$q['idfour']; }
     if (!empty($q['from'])) { $where[] = 'a.date_appro >= :d1'; $p['d1'] = $q['from']; }
     if (!empty($q['to'])) { $where[] = 'a.date_appro <= :d2'; $p['d2'] = $q['to']; }
-    if (!empty($q['q'])) { $where[] = '(a.numero LIKE :q OR a.numero_bon LIKE :q2 OR f.nom LIKE :q3)'; $like = '%' . trim($q['q']) . '%'; $p['q'] = $like; $p['q2'] = $like; $p['q3'] = $like; }
+    if (!empty($q['q'])) { $where[] = '(a.numero LIKE :q OR a.numero_bon LIKE :q2 OR a.note LIKE :q3)'; $like = '%' . trim($q['q']) . '%'; $p['q'] = $like; $p['q2'] = $like; $p['q3'] = $like; }
     $w = implode(' AND ', $where);
     $page = max(1, (int)($q['page'] ?? 1)); $per = min(100, max(1, (int)($q['per_page'] ?? 25)));
-    $st = $db->prepare("SELECT COUNT(*) FROM approvisionnements a JOIN fournisseurs f ON f.idfour = a.idfour WHERE $w"); $st->execute($p);
+    $st = $db->prepare("SELECT COUNT(*) FROM approvisionnements a WHERE $w"); $st->execute($p);
     $total = (int)$st->fetchColumn();
-    $st = $db->prepare("SELECT a.*, f.nom AS fournisseur, (SELECT COUNT(*) FROM appro_lignes l WHERE l.idappro = a.idappro) AS nb_lignes FROM approvisionnements a JOIN fournisseurs f ON f.idfour = a.idfour WHERE $w ORDER BY a.date_appro DESC, a.idappro DESC LIMIT " . (int)$per . ' OFFSET ' . (int)(($page - 1) * $per));
+    $st = $db->prepare('SELECT ' . APPRO_CHAMPS . ", CONCAT(u.nomag, ' ', u.prenom) AS utilisateur, (SELECT COUNT(*) FROM appro_lignes l WHERE l.idappro = a.idappro) AS nb_lignes FROM approvisionnements a LEFT JOIN users u ON u.id_user = a.iduser WHERE $w ORDER BY a.date_appro DESC, a.idappro DESC LIMIT " . (int)$per . ' OFFSET ' . (int)(($page - 1) * $per));
     $st->execute($p);
     return ['data' => $st->fetchAll(PDO::FETCH_ASSOC), 'meta' => ['total' => $total, 'page' => $page, 'per_page' => $per, 'pages' => max(1, (int)ceil($total / $per))]];
+}
+
+/* ---------- Factures fournisseurs : ce qu'on lui doit (indépendant des réceptions) ---------- */
+
+function facture_fournisseur_creer(PDO $db, array $user, array $in)
+{
+    exiger($user, 'achats.ecrire', "Seul le magasinier ou le gérant peut enregistrer une facture fournisseur.");
+    $err = [];
+    $date = trim((string)($in['date_facture'] ?? '')) ?: gmdate('Y-m-d');
+    $d = DateTime::createFromFormat('Y-m-d', $date);
+    if (!$d || $d->format('Y-m-d') !== $date || $date > gmdate('Y-m-d')) $err['date_facture'] = 'Date invalide';
+    $montant = round(nombre($in['montant'] ?? '', 'montant', 0.01), 2);
+    if ($err) throw new ApiError(422, 'Données invalides', $err);
+    $id = (int)($in['idfour'] ?? 0);
+    return stock_transaction($db, function () use ($db, $user, $in, $id, $date, $montant) {
+        $st = $db->prepare('SELECT * FROM fournisseurs WHERE idfour = ? AND supp = 0 FOR UPDATE'); $st->execute([$id]);
+        $f = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$f) throw new ApiError(404, 'Fournisseur introuvable');
+        $db->prepare('INSERT INTO fournisseur_factures (idfour, reference, date_facture, montant, note, iduser, created_at) VALUES (?,?,?,?,?,?,?)')
+            ->execute([$id, mb_substr(trim((string)($in['reference'] ?? '')), 0, 60), $date, $montant, mb_substr(trim((string)($in['note'] ?? '')), 0, 300), $user['id'], gmdate('Y-m-d H:i:s')]);
+        $idfacture = (int)$db->lastInsertId();
+        $db->prepare('UPDATE fournisseurs SET solde = solde + ? WHERE idfour = ?')->execute([$montant, $id]);
+        return ['idfacture' => $idfacture, 'fournisseur' => $f['nom'], 'montant' => $montant, 'solde' => round($f['solde'] + $montant, 2)];
+    });
+}
+
+/** Facture saisie par erreur : retirée par le gérant, tant qu'elle n'a pas déjà été payée (le solde dû la couvre encore). */
+function facture_fournisseur_annuler(PDO $db, array $user, $idfacture)
+{
+    if (!is_admin_role($user['role'])) throw new ApiError(403, "Seul le gérant peut retirer une facture fournisseur.");
+    return stock_transaction($db, function () use ($db, $idfacture) {
+        $st = $db->prepare('SELECT x.*, f.nom, f.solde FROM fournisseur_factures x JOIN fournisseurs f ON f.idfour = x.idfour WHERE x.idfacture = ? AND x.supp = 0 FOR UPDATE'); $st->execute([(int)$idfacture]);
+        $x = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$x) throw new ApiError(404, 'Facture introuvable');
+        if ((float)$x['solde'] < (float)$x['montant'] - 0.004) throw new ApiError(409, 'Cette facture a déjà été réglée en partie : le solde dû au fournisseur est inférieur à son montant.');
+        $db->prepare('UPDATE fournisseur_factures SET supp = 1 WHERE idfacture = ?')->execute([(int)$idfacture]);
+        $db->prepare('UPDATE fournisseurs SET solde = solde - ? WHERE idfour = ?')->execute([$x['montant'], $x['idfour']]);
+        return ['idfour' => (int)$x['idfour'], 'fournisseur' => $x['nom'], 'montant' => (float)$x['montant'], 'reference' => $x['reference']];
+    });
+}
+
+function factures_fournisseur(PDO $db, $idfour, $limite = 20)
+{
+    $st = $db->prepare("SELECT x.idfacture, x.reference, x.date_facture, x.montant, x.note, x.created_at, CONCAT(u.nomag, ' ', u.prenom) AS utilisateur FROM fournisseur_factures x LEFT JOIN users u ON u.id_user = x.iduser WHERE x.idfour = ? AND x.supp = 0 ORDER BY x.date_facture DESC, x.idfacture DESC LIMIT " . (int)$limite);
+    $st->execute([(int)$idfour]);
+    return array_map(function ($r) { $r['utilisateur'] = trim((string)$r['utilisateur']); return $r; }, $st->fetchAll(PDO::FETCH_ASSOC));
 }
 
 /** Règlement d'une dette fournisseur ou d'une créance client (paiement partiel possible, jamais supérieur au solde). */

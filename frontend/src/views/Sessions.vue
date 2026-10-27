@@ -4,6 +4,7 @@ import { api, auth, ApiError } from '../api'
 import { money, dateHeure } from '../format'
 import { toast } from '../toast'
 import Icon from '../components/Icon.vue'
+import Fenetre from '../components/Fenetre.vue'
 import SearchSelect from '../components/SearchSelect.vue'
 import Pager from '../components/Pager.vue'
 import ZReport from '../components/ZReport.vue'
@@ -70,21 +71,16 @@ const ecartBadge = (s) => (s.statut === 'ouverte' ? { cls: 'primary', text: 'En 
       <Pager :meta="meta" @goto="goto" />
     </div>
 
-    <div v-if="forcage.session" class="overlay center" @click.self="forcage.session = null" @keydown.esc="forcage.session = null">
-      <form class="modal" novalidate role="dialog" aria-modal="true" aria-label="Forcer la clôture" @submit.prevent="forcerCloture">
-        <h3>Forcer la clôture de la caisse ?</h3>
-        <p class="muted">Caisse <b>{{ forcage.session.caisse }}</b> ouverte par <b>{{ forcage.session.caissier }}</b> le {{ dateHeure(forcage.session.ouverture_at) }}.</p>
+    <Fenetre v-if="forcage.session" titre="Forcer la clôture de la caisse ?" icone="lock" :largeur="480" formulaire alerte :reductible="false" :occupe="forcage.busy" @close="forcage.session = null" @submit="forcerCloture">
+        <p class="muted" style="margin-top:0">Caisse <b>{{ forcage.session.caisse }}</b> ouverte par <b>{{ forcage.session.caissier }}</b> le {{ dateHeure(forcage.session.ouverture_at) }}.</p>
         <div class="alert" style="margin:12px 0">Les espèces ne seront <b>pas comptées</b> : le montant attendu est figé et l'écart restera inconnu. Le caissier devra rouvrir une caisse pour vendre. L'opération est enregistrée dans le journal d'audit.</div>
         <div class="field" :class="{ invalid: forcage.erreur }"><label for="f-motif">Motif <span class="req">*</span></label><input id="f-motif" v-model="forcage.motif" class="input" maxlength="200" placeholder="Ex. caissier parti sans clôturer" autofocus /><span v-if="forcage.erreur" class="error">{{ forcage.erreur }}</span></div>
-        <div class="row"><button type="button" class="btn" @click="forcage.session = null">Annuler</button><button class="btn strong" :disabled="forcage.busy"><Icon name="lock" :size="16" /> Clôturer la caisse</button></div>
-      </form>
-    </div>
+        <template #pied><button type="button" class="btn" :disabled="forcage.busy" @click="forcage.session = null">Annuler</button><button class="btn strong" :disabled="forcage.busy"><Icon name="lock" :size="16" /> Clôturer la caisse</button></template>
+    </Fenetre>
 
-    <div v-if="rapport" class="overlay center" @click.self="rapport = null" @keydown.esc="rapport = null">
-      <div class="modal" role="dialog" aria-modal="true" aria-label="Rapport de caisse" style="width:min(540px,calc(100% - 32px));max-height:calc(100vh - 32px);overflow-y:auto">
+    <Fenetre v-if="rapport" titre="Rapport de caisse" icone="sheet" :largeur="560" @close="rapport = null">
         <ZReport :rapport="rapport" />
-        <div class="row"><button class="btn" @click="rapport = null">Fermer</button><button class="btn primary" @click="imprimer"><Icon name="printer" :size="16" /> Imprimer</button></div>
-      </div>
-    </div>
+        <template #pied><button class="btn" @click="rapport = null">Fermer</button><button class="btn primary" @click="imprimer"><Icon name="printer" :size="16" /> Imprimer</button></template>
+    </Fenetre>
   </main>
 </template>

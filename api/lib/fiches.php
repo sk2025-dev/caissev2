@@ -32,8 +32,7 @@ function fournisseur_detail(PDO $db, array $user, $id, array $resources)
 {
     if (!$id) throw new ApiError(400, 'Identifiant requis');
     $f = (new Crud($db, 'fournisseurs', $resources['fournisseurs'], $user))->find($id);
-    $appros = appros_liste($db, ['idfour' => $id, 'per_page' => 15]);
-    return ['fournisseur' => $f, 'appros' => $appros['data'], 'reglements' => reglements_liste($db, 'fournisseur', $id)];
+    return ['fournisseur' => $f, 'factures' => factures_fournisseur($db, $id), 'reglements' => reglements_liste($db, 'fournisseur', $id)];
 }
 
 function recherche_globale(PDO $db, array $user, $q)

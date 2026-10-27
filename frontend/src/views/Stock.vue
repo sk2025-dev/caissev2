@@ -5,6 +5,7 @@ import { lookups, loadLookups } from '../lookups'
 import { money, qty, dateHeure, today, uniteAccord } from '../format'
 import { toast } from '../toast'
 import Icon from '../components/Icon.vue'
+import Fenetre from '../components/Fenetre.vue'
 import Pager from '../components/Pager.vue'
 import SearchSelect from '../components/SearchSelect.vue'
 import ExportButtons from '../components/ExportButtons.vue'
@@ -185,19 +186,16 @@ onMounted(async () => { await loadLookups().catch(() => {}); chargerNiveaux() })
     </div>
 
     <!-- Ajustement -->
-    <div v-if="aj.produit" class="overlay center" @click.self="aj.produit = null" @keydown.esc="aj.produit = null">
-      <form class="modal" novalidate role="dialog" aria-modal="true" aria-label="Ajuster le stock" @submit.prevent="ajuster">
-        <h3>Ajuster le stock</h3>
-        <p class="muted" style="margin:0">{{ aj.produit.nom }} — actuellement <b>{{ qty(aj.produit.stock_qty) }} {{ uniteAccord(aj.produit.stock_qty, aj.produit.unite) }}</b></p>
-        <div style="display:flex;flex-direction:column;gap:14px;margin-top:14px">
+    <Fenetre v-if="aj.produit" titre="Ajuster le stock" icone="box" largeur="sm" formulaire :occupe="aj.busy" @close="aj.produit = null" @submit="ajuster">
+        <template #sous-titre>{{ aj.produit.nom }} — actuellement <b>{{ qty(aj.produit.stock_qty) }} {{ uniteAccord(aj.produit.stock_qty, aj.produit.unite) }}</b></template>
+        <div style="display:flex;flex-direction:column;gap:14px">
           <div class="field"><label>Nature</label><div class="seg"><button type="button" :class="{ on: aj.type === 'ajustement' }" @click="aj.type = 'ajustement'">Correction</button><button type="button" :class="{ on: aj.type === 'perte' }" @click="aj.type = 'perte'">Perte / casse</button></div></div>
           <div class="field"><label>Saisie</label><div class="seg"><button type="button" :class="{ on: aj.mode === 'delta' }" @click="aj.mode = 'delta'">{{ aj.type === 'perte' ? 'Quantité perdue' : 'Ajouter / retirer' }}</button><button type="button" :class="{ on: aj.mode === 'set' }" @click="aj.mode = 'set'">Nouveau stock</button></div></div>
           <div class="field" :class="{ invalid: aj.erreurs.quantite }"><label for="aj-q">{{ aj.mode === 'set' ? 'Stock réel constaté' : aj.type === 'perte' ? 'Quantité perdue' : 'Quantité (négative pour retirer)' }}</label><input id="aj-q" v-model="aj.quantite" class="input" type="number" step="any" autofocus /><span v-if="aj.erreurs.quantite" class="error">{{ aj.erreurs.quantite }}</span><span v-else-if="apresAjust !== null" class="hint">Stock après : {{ qty(apresAjust) }} {{ aj.produit.unite }}</span></div>
           <div class="field" :class="{ invalid: aj.erreurs.motif }"><label for="aj-m">Motif <span class="req">*</span></label><input id="aj-m" v-model="aj.motif" class="input" maxlength="200" placeholder="Ex. carton abîmé, erreur de saisie…" /><span v-if="aj.erreurs.motif" class="error">{{ aj.erreurs.motif }}</span></div>
         </div>
-        <div class="row"><button type="button" class="btn" @click="aj.produit = null">Annuler</button><button class="btn primary" :disabled="aj.busy">Enregistrer</button></div>
-      </form>
-    </div>
+        <template #pied><button type="button" class="btn" :disabled="aj.busy" @click="aj.produit = null">Annuler</button><button class="btn primary" :disabled="aj.busy">Enregistrer</button></template>
+    </Fenetre>
   </main>
 </template>
 

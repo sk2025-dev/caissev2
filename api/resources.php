@@ -179,7 +179,7 @@ return [
 
     'fournisseurs' => [
         'table' => 'fournisseurs', 'pk' => 'idfour', 'pk_col' => 'f.idfour',
-        'select' => "f.*, (SELECT COUNT(*) FROM approvisionnements a WHERE a.idfour = f.idfour) AS nb_appros, (SELECT COALESCE(SUM(a.total), 0) FROM approvisionnements a WHERE a.idfour = f.idfour) AS total_achats",
+        'select' => "f.*, (SELECT COUNT(*) FROM fournisseur_factures x WHERE x.idfour = f.idfour AND x.supp = 0) AS nb_factures, (SELECT COALESCE(SUM(x.montant), 0) FROM fournisseur_factures x WHERE x.idfour = f.idfour AND x.supp = 0) AS total_achats",
         'from' => 'fournisseurs f', 'where' => 'f.supp = 0',
         'search' => ['f.nom', 'f.contact', 'f.telephone'],
         'custom_filters' => ['etat' => function ($v) { return $v === 'debiteur' ? '(f.solde > 0)' : null; }],

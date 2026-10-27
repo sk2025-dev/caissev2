@@ -4,7 +4,7 @@
  *   auth/* · public-config · dashboard · dashboard-mensuel · lookups · search · alertes · exports · config*
  *   caisse : pos-catalogue · mouvements-caisse · session-* · operation-caisse · depense-creer · categorie-mouvement-creer · justificatif · vente-creer · ventes · vente · vente-annuler · paniers
  *   commandes : commandes · commande · commandes-jour · commandes-jour-pdf · commande-creer · commande-statut · commande-livrer · commande-annuler
- *   stock : stock-ajuster · inventaire · inventaires · mouvements-stock · stock-balance    achats : appro-creer · appros · appro · reglement-creer · reglements
+ *   stock : stock-ajuster · inventaire · inventaires · mouvements-stock · stock-balance    achats : appro-creer · appros · appro · facture-fournisseur · reglement-creer · reglements
  *   fiches : produit-detail · client-detail · fournisseur-detail    traçabilité : journal
  *   caisses : caisse-config (produits vendus, numérotation, ticket propres à chaque caisse)
  *   catalogue numérique (public, sans compte) : catalogue · catalogue-produit · catalogue-image    réglages : catalogue-config
@@ -280,10 +280,23 @@ switch ($r) {
     case 'appro-creer':
         $post();
         $a = appro_creer($bdd, $user, $corps);
-        journaliser($bdd, $user, 'reception', 'approvisionnements', $a['idappro'], "Réception {$a['numero']} · {$a['fournisseur']} · " . journal_montant($a['total']) . $devise, ['bon' => $a['numero_bon'], 'articles' => count($a['lignes']), 'paye' => $a['paye'] + 0, 'reste' => $a['reste'] + 0]);
+        journaliser($bdd, $user, 'reception', 'approvisionnements', $a['idappro'], "Réception {$a['numero']} · " . journal_montant($a['total']) . $devise, ['bon' => $a['numero_bon'], 'articles' => count($a['lignes'])]);
         json_out(['appro' => $a], 201);
     case 'appros': exiger($user, 'achats.lire'); json_out(appros_liste($bdd, $q));
     case 'appro': exiger($user, 'achats.lire'); json_out(['appro' => appro_detail($bdd, $id)]);
+    case 'facture-fournisseur':   // POST : enregistrer une facture (dette) ; DELETE : la retirer (gérant)
+        if ($method === 'POST') {
+            $x = facture_fournisseur_creer($bdd, $user, $corps);
+            journaliser($bdd, $user, 'create', 'fournisseurs', (int)$corps['idfour'], "Facture du fournisseur « {$x['fournisseur']} » · " . journal_montant($x['montant']) . $devise,
+                ['reference' => (string)($corps['reference'] ?? ''), 'date' => (string)($corps['date_facture'] ?? ''), 'solde_du' => $x['solde']]);
+            json_out(['facture' => $x], 201);
+        }
+        if ($method === 'DELETE') {
+            $x = facture_fournisseur_annuler($bdd, $user, $id);
+            journaliser($bdd, $user, 'annulation', 'fournisseurs', $x['idfour'], "Facture retirée du fournisseur « {$x['fournisseur']} » · " . journal_montant($x['montant']) . $devise, ['reference' => $x['reference']]);
+            json_out(['ok' => true]);
+        }
+        throw new ApiError(405, 'Méthode non autorisée');
     case 'reglement-creer':
         $post();
         $reg = reglement_creer($bdd, $user, $corps);

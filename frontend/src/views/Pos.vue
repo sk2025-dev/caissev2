@@ -14,6 +14,7 @@ import QuickCreate from '../components/QuickCreate.vue'
 import Ticket from '../components/Ticket.vue'
 import CommandeForm from '../components/CommandeForm.vue'
 import ZReport from '../components/ZReport.vue'
+import Fenetre from '../components/Fenetre.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -211,7 +212,7 @@ function ouvrirPaiement() {
   paiement.erreur = ''
   paiement.lignes = [{ mode: cat.value.modes.find((m) => m.type === 'especes')?.code || cat.value.modes[0]?.code, montant: total.value, reference: '' }]
   paiement.ouvert = true
-  nextTick(() => { const i = document.querySelector('.modal.pay .pay-line input.big'); i?.focus(); i?.select() })
+  nextTick(() => { const i = document.querySelector('.pay-line input.big'); i?.focus(); i?.select() })
 }
 function ajouterMode(code) {
   const l = paiement.lignes.find((x) => x.mode === code)
@@ -493,9 +494,7 @@ function raccourcis(e) {
     </Transition>
 
     <!-- ===== Paiement ===== -->
-    <div v-if="paiement.ouvert" class="overlay center" @click.self="!paiement.busy && (paiement.ouvert = false)">
-      <div class="modal pay" role="dialog" aria-modal="true" aria-label="Paiement">
-        <h3>Encaissement</h3>
+    <Fenetre v-if="paiement.ouvert" titre="Encaissement" icone="cash" :largeur="520" :reductible="false" :occupe="paiement.busy" @close="paiement.ouvert = false">
         <div class="due"><span>À encaisser</span><b>{{ money(total) }}</b></div>
 
         <div class="modes">
@@ -521,31 +520,26 @@ function raccourcis(e) {
         </div>
         <div v-if="paiement.erreur" class="alert" role="alert">{{ paiement.erreur }}</div>
 
-        <div class="row">
+        <template #pied>
           <button class="btn" :disabled="paiement.busy" @click="paiement.ouvert = false">Retour</button>
           <button class="btn primary lg" :disabled="paiement.busy || invalideExces || (reste > 0 && !idclient)" @click="valider"><Icon name="check" :size="18" /> {{ paiement.busy ? 'Enregistrement…' : reste > 0 ? 'Valider à crédit' : 'Valider la vente' }}</button>
-        </div>
-      </div>
-    </div>
+        </template>
+    </Fenetre>
 
     <!-- ===== Ticket ===== -->
-    <div v-if="ticket || ticketCommande" class="overlay center">
-      <div class="modal ticket-modal" role="dialog" aria-modal="true" :aria-label="ticketCommande ? 'Commande enregistrée' : 'Vente enregistrée'">
-        <div class="done"><span class="ok"><Icon name="check" :size="26" /></span><div><h3>{{ ticketCommande ? 'Commande enregistrée' : 'Vente enregistrée' }}</h3><p v-if="ticket && Number(ticket.rendu) > 0" class="change-big">Rendre {{ money(ticket.rendu) }}</p></div></div>
+    <Fenetre v-if="ticket || ticketCommande" :titre="ticketCommande ? 'Commande enregistrée' : 'Vente enregistrée'" :sous-titre="(ticket || ticketCommande).numero" icone="check" :largeur="460" :reductible="false" @close="ticketCommande ? (ticketCommande = null) : nouvelleVente()">
+        <p v-if="ticket && Number(ticket.rendu) > 0" class="change-big">Rendre {{ money(ticket.rendu) }}</p>
         <div class="ticket-scroll"><Ticket :vente="ticket" :commande="ticketCommande" /></div>
-        <div class="row">
+        <template #pied>
           <button class="btn" @click="imprimer"><Icon name="printer" :size="16" /> Imprimer</button>
           <button v-if="ticketCommande" class="btn primary lg" @click="ticketCommande = null">Fermer</button>
           <button v-else class="btn primary lg" autofocus @click="nouvelleVente"><Icon name="plus" :size="16" /> Nouvelle vente</button>
-        </div>
-      </div>
-    </div>
+        </template>
+    </Fenetre>
 
     <!-- ===== Ventes en attente ===== -->
-    <div v-if="panneauAttente" class="overlay center" @click.self="panneauAttente = false" @keydown.esc="panneauAttente = false">
-      <div class="modal" role="dialog" aria-modal="true" aria-label="Ventes en attente" style="width:min(520px,calc(100% - 32px))">
-        <h3>Ventes en attente</h3>
-        <p v-if="!paniers.length" class="muted">Aucune vente en attente.</p>
+    <Fenetre v-if="panneauAttente" titre="Ventes en attente" :sous-titre="paniers.length ? `${paniers.length} panier${paniers.length > 1 ? 's' : ''} mis de côté` : ''" icone="pause" :largeur="520" @close="panneauAttente = false">
+        <p v-if="!paniers.length" class="muted" style="margin:0">Aucune vente en attente.</p>
         <div class="list">
           <div v-for="p in paniers" :key="p.idpanier" class="item">
             <span class="tile primary"><Icon name="pause" :size="18" /></span>
@@ -554,28 +548,22 @@ function raccourcis(e) {
             <button class="btn ghost icon sm" :aria-label="`Supprimer ${p.libelle || 'cette vente en attente'}`" @click="supprimerAttente(p)"><Icon name="trash" :size="15" /></button>
           </div>
         </div>
-        <div class="row"><button class="btn" @click="panneauAttente = false">Fermer</button></div>
-      </div>
-    </div>
+        <template #pied><button class="btn" @click="panneauAttente = false">Fermer</button></template>
+    </Fenetre>
 
     <!-- ===== Entrée / sortie d'espèces ===== -->
-    <div v-if="mvt.ouvert" class="overlay center" @click.self="mvt.ouvert = false" @keydown.esc="mvt.ouvert = false">
-      <form class="modal" novalidate role="dialog" aria-modal="true" :aria-label="mvt.type === 'sortie' ? 'Nouvelle dépense' : 'Entrée de caisse'" @submit.prevent="enregistrerMvt">
-        <h3>{{ mvt.type === 'sortie' ? 'Nouvelle dépense / sortie de caisse' : 'Entrée d\'espèces' }}</h3>
-        <p class="muted">{{ mvt.type === 'sortie' ? 'Dépense payée avec le tiroir-caisse, retrait, dépôt en banque…' : 'Apport de monnaie, fonds ajoutés au tiroir…' }}</p>
-        <div style="display:flex;flex-direction:column;gap:14px;margin-top:14px">
+    <Fenetre v-if="mvt.ouvert" :titre="mvt.type === 'sortie' ? 'Nouvelle dépense / sortie de caisse' : 'Entrée d\'espèces'" :sous-titre="mvt.type === 'sortie' ? 'Dépense payée avec le tiroir-caisse, retrait, dépôt en banque…' : 'Apport de monnaie, fonds ajoutés au tiroir…'" :icone="mvt.type === 'sortie' ? 'up' : 'down'" largeur="sm" formulaire :occupe="mvt.busy" @close="mvt.ouvert = false" @submit="enregistrerMvt">
+        <div style="display:flex;flex-direction:column;gap:14px">
           <div class="field" :class="{ invalid: mvt.erreurs.montant }"><label for="m-mt">Montant</label><input id="m-mt" v-model="mvt.montant" class="input" type="number" min="1" inputmode="numeric" autofocus /><span v-if="mvt.erreurs.montant" class="error">{{ mvt.erreurs.montant }}</span></div>
           <div class="field" :class="{ invalid: mvt.erreurs.categorie }"><label for="m-cat">Catégorie <span class="req">*</span></label><SearchSelect id="m-cat" v-model="mvt.categorie" :options="categoriesMvt.map(([code, lib]) => ({ value: code, label: lib }))" placeholder="Choisir…" :invalid="!!mvt.erreurs.categorie" :create-label="peutCreerCategorie ? 'catégorie' : ''" @create="creerCategorieMvt" /><span v-if="mvt.erreurs.categorie" class="error">{{ mvt.erreurs.categorie }}</span></div>
           <div class="field" :class="{ invalid: mvt.erreurs.motif }"><label for="m-mo">Libellé / motif <span class="req">*</span></label><input id="m-mo" v-model="mvt.motif" class="input" maxlength="200" placeholder="Ex. achat de sachets" /><span v-if="mvt.erreurs.motif" class="error">{{ mvt.erreurs.motif }}</span></div>
           <div class="field"><label for="m-ref">N° de justificatif (facture, reçu…)</label><input id="m-ref" v-model="mvt.reference" class="input" maxlength="80" placeholder="Facultatif" /></div>
         </div>
-        <div class="row"><button type="button" class="btn" @click="mvt.ouvert = false">Annuler</button><button class="btn primary" :disabled="mvt.busy">Enregistrer</button></div>
-      </form>
-    </div>
+        <template #pied><button type="button" class="btn" :disabled="mvt.busy" @click="mvt.ouvert = false">Annuler</button><button class="btn primary" :disabled="mvt.busy">Enregistrer</button></template>
+    </Fenetre>
 
     <!-- ===== Clôture ===== -->
-    <div v-if="clo.ouvert" class="overlay center">
-      <div class="modal close-modal" role="dialog" aria-modal="true" aria-label="Clôture de caisse">
+    <Fenetre v-if="clo.ouvert" :titre="clo.final ? 'Caisse clôturée' : 'Clôture de caisse'" :sous-titre="clo.final ? 'Merci, à demain !' : 'Comptez les espèces du tiroir, puis clôturez'" :icone="clo.final ? 'check' : 'lock'" :largeur="560" :occupe="clo.busy" @close="clo.final ? finCloture() : (clo.ouvert = false)">
         <template v-if="!clo.final">
           <ZReport :rapport="clo.rapport" />
           <div class="count">
@@ -591,15 +579,13 @@ function raccourcis(e) {
               <span v-if="clo.erreurs.notes" class="error">{{ clo.erreurs.notes }}</span>
             </div>
           </div>
-          <div class="row"><button class="btn" @click="clo.ouvert = false">Annuler</button><button class="btn danger" :disabled="clo.busy || clo.compte === ''" @click="cloturer"><Icon name="lock" :size="16" /> {{ clo.busy ? 'Clôture…' : 'Clôturer la caisse' }}</button></div>
         </template>
-        <template v-else>
-          <div class="done"><span class="ok"><Icon name="check" :size="26" /></span><div><h3>Caisse clôturée</h3><p class="muted">Merci, à demain !</p></div></div>
-          <ZReport :rapport="clo.final" />
-          <div class="row"><button class="btn" @click="imprimer"><Icon name="printer" :size="16" /> Imprimer</button><button class="btn primary" @click="finCloture">Terminer</button></div>
+        <ZReport v-else :rapport="clo.final" />
+        <template #pied>
+          <template v-if="!clo.final"><button class="btn" :disabled="clo.busy" @click="clo.ouvert = false">Annuler</button><button class="btn danger" :disabled="clo.busy || clo.compte === ''" @click="cloturer"><Icon name="lock" :size="16" /> {{ clo.busy ? 'Clôture…' : 'Clôturer la caisse' }}</button></template>
+          <template v-else><button class="btn" @click="imprimer"><Icon name="printer" :size="16" /> Imprimer</button><button class="btn primary" @click="finCloture">Terminer</button></template>
         </template>
-      </div>
-    </div>
+    </Fenetre>
 
     <CommandeForm v-if="commande" :lignes-init="lignes.map((l) => ({ idprod: l.idprod, nom: l.nom, unite: l.unite, quantite: l.quantite, prix: l.prix }))" :client-init="idclient" @close="commande = false" @created="commandeCreee" />
     <QuickCreate v-if="nouveauClient !== null" :spec="specClient" :name="nouveauClient" @close="nouveauClient = null" @created="clientCree" />
@@ -720,8 +706,7 @@ function raccourcis(e) {
 .drawer-enter-active, .drawer-leave-active { transition: background .25s; } .drawer-enter-active .drawer, .drawer-leave-active .drawer { transition: transform .3s var(--ease); }
 .drawer-enter-from, .drawer-leave-to { background: transparent; } .drawer-enter-from .drawer, .drawer-leave-to .drawer { transform: translateX(-100%); }
 
-.modal.pay { width: min(520px, calc(100% - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; }
-.due { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 16px; border-radius: 16px; background: var(--surface-2); margin: 8px 0 14px; }
+.due { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 16px; border-radius: 16px; background: var(--surface-2); margin: 0 0 14px; }
 .due b { font-size: 28px; }
 .modes { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .pay-line { padding: 12px; border: 1px solid var(--border); border-radius: 16px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px; }
@@ -734,14 +719,8 @@ function raccourcis(e) {
 .warn { margin: 0; color: var(--danger); font-size: 13px; }
 .small { font-size: 13px; margin: 0; }
 
-.ticket-modal { width: min(460px, calc(100% - 32px)); max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
-.ticket-scroll { overflow-y: auto; margin: 12px 0 0; padding: 4px; background: var(--surface-2); border-radius: 16px; }
-.done { display: flex; align-items: center; gap: 14px; }
-.done h3 { margin: 0; }
-.done .ok { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: var(--success); color: #fff; animation: pop .4s var(--ease); }
-.change-big { margin: 2px 0 0; font-size: 22px; font-weight: 800; color: var(--success); }
-
-.close-modal { width: min(560px, calc(100% - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; }
+.ticket-scroll { padding: 4px; background: var(--surface-2); border-radius: 16px; }
+.change-big { margin: 0 0 12px; padding: 12px 16px; border-radius: 14px; background: var(--success-soft); font-size: 24px; font-weight: 800; color: var(--success); text-align: center; }
 .count { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 2px solid var(--border); }
 .ecart { padding: 10px 14px; border-radius: 12px; font-weight: 700; }
 .ecart.ok { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); }

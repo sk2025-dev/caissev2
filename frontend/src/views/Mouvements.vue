@@ -8,6 +8,7 @@ import { money, dateHeure, date, today } from '../format'
 import { logoUrl, nomApp } from '../theme'
 import { toast } from '../toast'
 import Icon from '../components/Icon.vue'
+import Fenetre from '../components/Fenetre.vue'
 import SearchSelect from '../components/SearchSelect.vue'
 import Pager from '../components/Pager.vue'
 import ExportButtons from '../components/ExportButtons.vue'
@@ -163,12 +164,9 @@ const edite = new Date().toISOString().slice(0, 19).replace('T', ' ')
       <Pager :meta="meta" @goto="(p) => { f.page = p; load() }" />
     </div>
 
-    <div v-if="dep.ouvert" class="overlay center" style="overflow-y:auto;padding:16px 0" @click.self="dep.ouvert = false" @keydown.esc="dep.ouvert = false">
-      <form class="modal" style="width:min(520px,calc(100% - 32px))" novalidate role="dialog" aria-modal="true" aria-label="Nouvelle dépense" @submit.prevent="enregistrerDepense">
-        <h3>Nouvelle dépense</h3>
-        <p class="muted">Dépense réglée hors du tiroir-caisse : elle ne modifie pas le comptage des caisses.</p>
-        <div style="display:flex;flex-direction:column;gap:14px;margin-top:14px">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <Fenetre v-if="dep.ouvert" titre="Nouvelle dépense" sous-titre="Réglée hors du tiroir-caisse : le comptage des caisses n'est pas modifié" icone="up" :largeur="520" formulaire :occupe="dep.busy" @close="dep.ouvert = false" @submit="enregistrerDepense">
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div class="deux">
             <div class="field" :class="{ invalid: dep.erreurs.date }"><label for="d-date">Date</label><input id="d-date" v-model="dep.date" class="input" type="date" :max="today()" /><span v-if="dep.erreurs.date" class="error">{{ dep.erreurs.date }}</span></div>
             <div class="field" :class="{ invalid: dep.erreurs.montant }"><label for="d-mt">Montant <span class="req">*</span></label><input id="d-mt" v-model="dep.montant" class="input" type="number" min="1" inputmode="numeric" autofocus /><span v-if="dep.erreurs.montant" class="error">{{ dep.erreurs.montant }}</span></div>
           </div>
@@ -178,9 +176,8 @@ const edite = new Date().toISOString().slice(0, 19).replace('T', ' ')
           <div class="field"><label for="d-ref">N° de justificatif (facture, reçu…)</label><input id="d-ref" v-model="dep.reference" class="input" maxlength="80" placeholder="Facultatif" /></div>
           <div class="field" :class="{ invalid: dep.erreurs.justificatif }"><label for="d-pj">Pièce justificative <small class="muted" style="font-weight:400">(facultatif — PDF ou photo, 5 Mo max.)</small></label><FileDrop id="d-pj" v-model="dep.fichier" accept=".pdf,.jpg,.jpeg,.png,.webp" :max-mb="5" :invalid="!!dep.erreurs.justificatif" /><span v-if="dep.erreurs.justificatif" class="error">{{ dep.erreurs.justificatif }}</span></div>
         </div>
-        <div class="row"><button type="button" class="btn" @click="dep.ouvert = false">Annuler</button><button class="btn primary" :disabled="dep.busy">Enregistrer</button></div>
-      </form>
-    </div>
+        <template #pied><button type="button" class="btn" :disabled="dep.busy" @click="dep.ouvert = false">Annuler</button><button class="btn primary" :disabled="dep.busy">Enregistrer</button></template>
+    </Fenetre>
 
     <!-- État imprimable : toute la période, présentation comptable (entrées / sorties en colonnes) -->
     <div v-if="etat" class="print-area etat">

@@ -9,6 +9,7 @@ import { resources } from '../resources'
 import Icon from './Icon.vue'
 import SearchSelect from './SearchSelect.vue'
 import FormDrawer from './FormDrawer.vue'
+import Fenetre from './Fenetre.vue'
 
 const props = defineProps({
   lignesInit: { type: Array, default: () => [] },   // [{ idprod, nom, unite, quantite, prix }]
@@ -121,15 +122,13 @@ async function envoyer() {
 </script>
 
 <template>
-  <div class="overlay center" @click.self="emit('close')" @keydown.esc="emit('close')">
-    <form class="modal cmd-form" novalidate role="dialog" aria-modal="true" aria-label="Nouvelle commande" @submit.prevent="envoyer">
-      <header>
-        <h3>Nouvelle commande</h3>
+  <Fenetre titre="Nouvelle commande" icone="truck" :largeur="920" formulaire :occupe="busy" @close="emit('close')" @submit="envoyer">
+      <div class="mode">
         <div class="seg" role="tablist" aria-label="Mode">
           <button type="button" :class="{ on: f.mode === 'livraison' }" role="tab" @click="f.mode = 'livraison'"><Icon name="truck" :size="14" /> Livraison</button>
           <button type="button" :class="{ on: f.mode === 'retrait' }" role="tab" @click="f.mode = 'retrait'"><Icon name="cart" :size="14" /> Retrait en boutique</button>
         </div>
-      </header>
+      </div>
 
       <div class="cols">
         <section>
@@ -191,19 +190,17 @@ async function envoyer() {
 
       <p class="hint">Les articles sont déduits du stock dès l'enregistrement. Une annulation les remet en stock. Le paiement se fait à la remise.</p>
       <div v-if="erreur && !Object.keys(erreurs).length" class="alert" role="alert">{{ erreur }}</div>
-      <div class="row">
-        <button type="button" class="btn" @click="emit('close')">Annuler</button>
+      <template #pied>
+        <span class="grow total-pied">Total <b>{{ money(total) }}</b></span>
+        <button type="button" class="btn" :disabled="busy" @click="emit('close')">Annuler</button>
         <button class="btn primary" :disabled="busy || !lignes.length"><Icon name="check" :size="16" /> {{ busy ? 'Enregistrement…' : 'Enregistrer la commande' }}</button>
-      </div>
-    </form>
-  </div>
+      </template>
+  </Fenetre>
   <FormDrawer v-if="creationArticle" :config="creationArticle" route="produits" id-key="idprod" @close="creationArticle = null" @saved="articleCree" />
 </template>
 
 <style scoped>
-.cmd-form { width: min(920px, calc(100% - 24px)); max-height: calc(100vh - 24px); overflow-y: auto; }
-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-header h3 { margin: 0; }
+.mode { margin-bottom: 14px; }
 .seg button { display: inline-flex; align-items: center; gap: 6px; }
 .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 section { display: flex; flex-direction: column; gap: 12px; min-width: 0; }

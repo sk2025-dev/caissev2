@@ -388,6 +388,53 @@ table.table { width: 100%; border-collapse: collapse; }
 .modal .row > .btn svg { flex-shrink: 0; }
 .overlay.center { justify-content: center; align-items: center; }
 
+/* Fenêtre commune (components/Fenetre.vue) : en-tête · corps qui défile · pied d'actions */
+.fen { display: flex; flex-direction: column; padding: 0; overflow: hidden; outline: none; }
+.modal.fen { width: min(var(--fen-l, 560px), calc(100% - 32px)); max-height: calc(100dvh - 32px); }
+.drawer.fen { width: min(var(--fen-l, 580px), 100%); }
+.modal.fen.agrandie { width: calc(100% - 32px); height: calc(100dvh - 32px); }
+.drawer.fen.agrandie { width: 100%; border-radius: 0; }
+.fen-tete { flex: none; display: flex; align-items: center; gap: 12px; padding: 14px 14px 14px 24px; border-bottom: 1px solid var(--border); }
+.fen-icone { flex: none; width: 36px; height: 36px; border-radius: 12px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); }
+.fen-titres { flex: 1; min-width: 0; }
+.fen-titres h2 { margin: 0; font-size: 18px; letter-spacing: -.01em; line-height: 1.3; overflow-wrap: anywhere; }
+.fen-titres p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.fen-btns { flex: none; display: flex; gap: 2px; margin-left: auto; align-self: flex-start; }
+.fen-btn { width: 36px; height: 36px; border: 0; border-radius: 11px; background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; transition: background .15s, color .15s; }
+.fen-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.fen-btn.fermer:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger); }
+.fen-btn:disabled { opacity: .4; cursor: not-allowed; }
+.fen-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.fen-corps { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 20px 24px; }
+.fen-corps.grille, .fen-grille { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-content: start; }
+.fen-corps.grille .full, .fen-grille .full { grid-column: 1 / -1; }
+.fen-corps > h3:first-child { margin-top: 0; }
+.fen-corps.plein { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+.fen-pied { flex: none; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 10px; padding: 14px 24px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--surface-2) 60%, var(--surface)); }
+.fen-pied > .btn { min-width: 0; max-width: 100%; white-space: normal; }
+.fen-pied > .btn svg { flex-shrink: 0; }
+.fen-pied .grow { flex: 1; }
+.total-pied { color: var(--muted); font-weight: 600; } .total-pied b { color: var(--text); font-size: 18px; margin-left: 6px; white-space: nowrap; }
+.fen-reduite { position: fixed; z-index: 45; left: 16px; bottom: calc(16px + var(--i, 0) * 54px); display: flex; align-items: center; gap: 2px; max-width: min(340px, calc(100vw - 32px)); padding: 4px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-lg); animation: pop .28s var(--ease); }
+.fen-restaurer { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; padding: 8px 12px; border: 0; border-radius: 12px; background: var(--primary-soft); color: var(--primary); font: inherit; font-weight: 700; font-size: 14px; cursor: pointer; }
+.fen-restaurer span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fen-restaurer:hover { background: color-mix(in srgb, var(--primary) 18%, var(--surface)); }
+@media (max-width: 560px) {
+  .overlay.center:has(> .modal.fen) { align-items: flex-end; }
+  .modal.fen { width: 100%; max-height: calc(100dvh - 12px); margin: 0; align-self: flex-end; border-radius: 24px 24px 0 0; animation: sheet .3s var(--ease); }
+  .modal.fen.agrandie { width: 100%; height: 100dvh; max-height: none; border-radius: 0; }
+  .fen-tete { padding: 10px 8px 10px 18px; }
+  .fen-corps { padding: 16px 18px; }
+  .fen-corps.grille, .fen-grille { grid-template-columns: 1fr; }
+  .fen-pied { padding: 12px 18px calc(12px + env(safe-area-inset-bottom)); }
+  .fen-pied > .btn { flex: 1 1 140px; min-height: 44px; }
+  .fen-btn.agrandir { display: none; }
+}
+@keyframes sheet { from { transform: translateY(40px); opacity: .4; } }
+.ticket-fond { background: var(--surface-2); border-radius: 16px; padding: 4px; }
+.deux { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 480px) { .deux { grid-template-columns: 1fr; } }
+
 /* ---------- Notifications ---------- */
 .toasts { position: fixed; right: 18px; top: 18px; pointer-events: none; display: flex; flex-direction: column; gap: 10px; z-index: 80; }
 .toast { padding: 13px 18px; border-radius: 16px; background: var(--text); color: var(--bg); box-shadow: var(--shadow-lg); font-weight: 700; max-width: 360px; animation: pop .3s var(--ease); }
@@ -724,7 +771,7 @@ a.rowlink:hover { color: var(--primary); text-decoration: none; }
   .header .grow { display: none; }
   .page-head h1 { font-size: 24px; }
   .drawer { border-radius: 0; }
-  .drawer .body { grid-template-columns: 1fr; }
+  .drawer .body, .drawer .fen-grille, .drawer .fen-corps.grille { grid-template-columns: 1fr; }
   .bar-row { grid-template-columns: 90px 1fr auto; }
   .menu.wide { min-width: 0; width: min(340px, calc(100vw - 32px)); position: fixed; right: 16px; top: 76px; }
   .table.stack thead { display: none; }
@@ -796,6 +843,8 @@ a.rowlink:hover { color: var(--primary); text-decoration: none; }
   .overlay, .modal, .modal * { max-height: none !important; }
   .overlay, .modal { position: static !important; display: block !important; overflow: visible !important; width: auto !important; transform: none !important; background: none !important; box-shadow: none !important; padding: 0 !important; border: 0 !important; backdrop-filter: none !important; }
   .zr.print-area { width: 100% !important; }
+  .fen-tete, .fen-pied, .fen-reduite { display: none !important; }
+  .fen-corps { overflow: visible !important; padding: 0 !important; }
   .toasts, .splash { display: none !important; }
 }
 .nav { min-height: 0; flex: 0 1 auto; scrollbar-width: thin; }

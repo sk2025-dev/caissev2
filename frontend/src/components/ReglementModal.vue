@@ -6,6 +6,7 @@ import { lookups, loadLookups } from '../lookups'
 import { money } from '../format'
 import { toast } from '../toast'
 import Icon from './Icon.vue'
+import Fenetre from './Fenetre.vue'
 
 const props = defineProps({ type: { type: String, required: true }, id: { type: [Number, String], required: true }, nom: String, solde: { type: [Number, String], required: true } })
 const emit = defineEmits(['close', 'done'])
@@ -25,19 +26,16 @@ async function envoyer() {
 </script>
 
 <template>
-  <div class="overlay center" @click.self="emit('close')" @keydown.esc="emit('close')">
-    <form class="modal" novalidate role="dialog" aria-modal="true" :aria-label="type === 'client' ? 'Encaisser un règlement' : 'Payer le fournisseur'" @submit.prevent="envoyer">
-      <h3>{{ type === 'client' ? 'Encaisser un règlement' : 'Payer le fournisseur' }}</h3>
-      <p class="muted" style="margin:0">{{ nom }} — {{ type === 'client' ? 'doit' : 'nous lui devons' }} <b>{{ money(solde) }}</b></p>
-      <div style="display:flex;flex-direction:column;gap:14px;margin-top:14px">
+  <Fenetre :titre="type === 'client' ? 'Encaisser un règlement' : 'Payer le fournisseur'" icone="cash" largeur="sm" formulaire :occupe="f.busy" @close="emit('close')" @submit="envoyer">
+      <template #sous-titre>{{ nom }} — {{ type === 'client' ? 'doit' : 'nous lui devons' }} <b>{{ money(solde) }}</b></template>
+      <div style="display:flex;flex-direction:column;gap:14px">
         <div class="field" :class="{ invalid: f.erreurs.montant }"><label for="rg-m">Montant</label><input id="rg-m" v-model="f.montant" class="input big" type="number" min="1" :max="solde" autofocus /><span v-if="f.erreurs.montant" class="error">{{ f.erreurs.montant }}</span></div>
         <div class="field"><label>Mode de paiement</label><div class="seg wrap"><button v-for="m in lookups.modes" :key="m.code" type="button" :class="{ on: f.mode === m.code }" @click="f.mode = m.code">{{ m.libelle }}</button></div></div>
         <div v-if="f.mode !== 'especes'" class="field"><label for="rg-r">Référence</label><input id="rg-r" v-model="f.reference" class="input" maxlength="80" /></div>
         <p v-if="type === 'client' && f.mode === 'especes'" class="muted" style="margin:0;font-size:13px">Les espèces sont comptées dans votre caisse ouverte (si vous en avez une).</p>
       </div>
-      <div class="row"><button type="button" class="btn" @click="emit('close')">Annuler</button><button class="btn primary" :disabled="f.busy"><Icon name="check" :size="16" /> Valider</button></div>
-    </form>
-  </div>
+      <template #pied><button type="button" class="btn" :disabled="f.busy" @click="emit('close')">Annuler</button><button class="btn primary" :disabled="f.busy"><Icon name="check" :size="16" /> Valider</button></template>
+  </Fenetre>
 </template>
 
 <style scoped>

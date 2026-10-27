@@ -69,12 +69,14 @@ foreach ([['Mme Koné', '+225 07 11 22 33 44', 50000], ['Restaurant Chez Awa', '
     $bdd->prepare('INSERT INTO clients (nom, telephone, plafond_credit, solde, supp, dateenr) VALUES (?,?,?,0,0,?)')->execute([$c[0], $c[1], $c[2], $now]); $clients[] = (int)$bdd->lastInsertId();
 }
 
-/* ---- Réceptions de marchandises (il y a 25 jours), via la logique réelle (coût moyen, dette fournisseur) ---- */
+/* ---- Réceptions de marchandises (il y a 25 jours), via la logique réelle (coût moyen) ; factures et paiements des fournisseurs à part ---- */
 $parFour = [0 => [], 1 => [], 2 => []];
 foreach ($prod as $p) { if ($p['service']) continue; $parFour[$p['nom'] === 'Cahier 96 pages' || $p['nom'] === 'Stylo à bille' ? 2 : (strpos($p['nom'], 'Eau') === 0 || strpos($p['nom'], 'Jus') === 0 || strpos($p['nom'], 'Soda') === 0 || strpos($p['nom'], 'Bière') === 0 || strpos($p['nom'], 'Lait') === 0 ? 1 : 0)][] = $p; }
 foreach ($parFour as $i => $liste) {
     $lignes = array_map(function ($p) { return ['idprod' => $p['id'], 'quantite' => $p['unite'] === 'kg' ? 60 : mt_rand(40, 90), 'cout_unitaire' => $p['pa']]; }, $liste);
-    $a = appro_creer($bdd, $userGerant + ['nom' => 'Gérant'], ['idfour' => $fours[$i], 'date_appro' => gmdate('Y-m-d', strtotime('-25 days')), 'lignes' => $lignes, 'paye' => $i === 0 ? 0 : round(array_sum(array_map(function ($l) { return $l['quantite'] * $l['cout_unitaire']; }, $lignes)) * 0.6), 'mode' => 'especes', 'numero_bon' => 'BL-' . (100 + $i)]);
+    $a = appro_creer($bdd, $userGerant + ['nom' => 'Gérant'], ['date_appro' => gmdate('Y-m-d', strtotime('-25 days')), 'lignes' => $lignes, 'numero_bon' => 'BL-' . (100 + $i)]);
+    facture_fournisseur_creer($bdd, $userGerant + ['nom' => 'Gérant'], ['idfour' => $fours[$i], 'montant' => $a['total'], 'reference' => 'FAC-' . (500 + $i), 'date_facture' => gmdate('Y-m-d', strtotime('-25 days'))]);
+    if ($i) reglement_creer($bdd, $userGerant + ['nom' => 'Gérant'], ['tiers_type' => 'fournisseur', 'tiers_id' => $fours[$i], 'montant' => round($a['total'] * 0.6), 'mode' => 'especes', 'note' => 'Acompte']);
 }
 $bdd->prepare("UPDATE mouvements_stock SET created_at = ? WHERE type = 'entree_achat'")->execute([gmdate('Y-m-d 08:00:00', strtotime('-25 days'))]);
 
