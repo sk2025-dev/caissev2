@@ -117,10 +117,15 @@ const q = ref('')
 const catSel = ref(null)
 const recherche = ref(null)
 const norm = (s) => String(s || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+// Les articles vendables d'abord : une rupture passe en fin de grille au lieu d'occuper la place des produits disponibles
 const visibles = computed(() => {
   const t = norm(q.value.trim())
-  return cat.value.produits.filter((p) => (!catSel.value || p.idcat === catSel.value) && (!t || norm(p.nom).includes(t) || norm(p.sku).includes(t) || norm(p.code_barres).includes(t)))
+  const liste = cat.value.produits.filter((p) => (!catSel.value || p.idcat === catSel.value) && (!t || norm(p.nom).includes(t) || norm(p.sku).includes(t) || norm(p.code_barres).includes(t)))
+  return liste.map((p, i) => [p, i]).sort((a, b) => (stockEtat(a[0]) === 'rupture') - (stockEtat(b[0]) === 'rupture') || a[1] - b[1]).map(([p]) => p)
 })
+const couleurCat = computed(() => Object.fromEntries(cat.value.categories.map((c) => [c.id, teinte(c)])))
+const dansPanier = computed(() => Object.fromEntries(lignes.value.map((l) => [l.idprod, l.quantite])))
+const nbParCat = computed(() => cat.value.produits.reduce((n, p) => { n[p.idcat] = (n[p.idcat] || 0) + 1; return n }, {}))
 function entrerRecherche() {
   const t = q.value.trim()
   if (!t) return
@@ -452,26 +457,33 @@ function raccourcis(e) {
         </div>
 
         <div class="cats" role="tablist" aria-label="Catégories">
-          <button class="cat-tile" :class="{ on: !catSel }" role="tab" :aria-selected="!catSel" style="--c: var(--primary)" @click="catSel = null"><span>Tout</span></button>
+          <button class="cat-tile" :class="{ on: !catSel }" role="tab" :aria-selected="!catSel" style="--c: var(--primary)" @click="catSel = null"><span>Tout</span><small>{{ cat.produits.length }}</small></button>
           <button v-for="c in cat.categories" :key="c.id" class="cat-tile" :class="{ on: catSel === c.id }" role="tab" :aria-selected="catSel === c.id" :style="{ '--c': teinte(c) }" @click="catSel = catSel === c.id ? null : c.id">
             <img v-if="c.image" :src="fileUrl('categories', c.image)" alt="" loading="lazy" />
             <img v-else-if="vignette(c.id)" :src="fileUrl('produits', vignette(c.id))" alt="" loading="lazy" />
-            <span>{{ c.nom }}</span>
+            <span>{{ c.nom }}</span><small>{{ nbParCat[c.id] || 0 }}</small>
           </button>
         </div>
 
         <div class="zone-prod">
           <div v-if="!visibles.length" class="empty"><Icon name="inbox" :size="40" /><div>{{ cat.produits.length ? 'Aucun produit ne correspond.' : 'Le catalogue est vide. Ajoutez des produits pour commencer à vendre.' }}</div></div>
           <div v-else class="grid-prod">
-            <button v-for="p in visibles" :key="p.id" class="prod" :class="{ out: stockEtat(p) === 'rupture', photo: p.image }" :disabled="stockEtat(p) === 'rupture' && !lookups.reglages.stock_negatif" @click="ajouter(p)">
-              <img v-if="p.image" :src="fileUrl('produits', p.image)" alt="" loading="lazy" />
-              <Icon v-else class="ph" :name="p.type === 'service' ? 'clipboard' : 'box'" :size="34" />
-              <span class="price">{{ money(p.prix_vente) }}</span>
-              <span v-if="p.type === 'service'" class="stk svc">Service</span>
-              <span v-else-if="stockEtat(p) === 'rupture'" class="stk bad">Rupture</span>
-              <span v-else class="stk" :class="{ low: stockEtat(p) === 'bas' }">{{ qty(p.stock_qty) }} {{ uniteAccord(p.stock_qty, p.unite) }}</span>
-              <b class="nom">{{ p.nom }}</b>
-              <span v-if="lignes.find((l) => l.idprod === p.id)" class="in-cart">{{ qty(lignes.find((l) => l.idprod === p.id).quantite) }}</span>
+            <button v-for="p in visibles" :key="p.id" class="prod" :class="{ out: stockEtat(p) === 'rupture', choisi: dansPanier[p.id] }" :style="{ '--c': couleurCat[p.idcat] || 'var(--primary)' }"
+                    :disabled="stockEtat(p) === 'rupture' && !lookups.reglages.stock_negatif" :title="p.nom" @click="ajouter(p)">
+              <span class="visuel">
+                <img v-if="p.image" :src="fileUrl('produits', p.image)" alt="" loading="lazy" />
+                <span v-else class="mono" aria-hidden="true"><Icon :name="p.type === 'service' ? 'clipboard' : 'box'" :size="38" /></span>
+                <span v-if="stockEtat(p) === 'rupture'" class="bandeau">Rupture</span>
+                <span v-if="dansPanier[p.id]" class="in-cart" :aria-label="`${qty(dansPanier[p.id])} dans le panier`">{{ qty(dansPanier[p.id]) }}</span>
+              </span>
+              <span class="infos">
+                <b class="nom">{{ p.nom }}</b>
+                <span class="bas">
+                  <span class="price">{{ money(p.prix_vente) }}</span>
+                  <span v-if="p.type === 'service'" class="stk svc">Service</span>
+                  <span v-else-if="stockEtat(p) !== 'rupture'" class="stk" :class="{ low: stockEtat(p) === 'bas' }">{{ qty(p.stock_qty) }} {{ uniteAccord(p.stock_qty, p.unite) }}</span>
+                </span>
+              </span>
             </button>
           </div>
         </div>
@@ -674,29 +686,40 @@ function raccourcis(e) {
 .t-search .scan { width: 56px; }
 .t-user { font-weight: 600; white-space: nowrap; }
 .cats { display: flex; overflow-x: auto; flex: none; background: var(--surface-2); scrollbar-width: none; }
-.cat-tile { position: relative; flex: none; width: 104px; height: 92px; border: 0; padding: 0 6px 8px; display: flex; align-items: flex-end; justify-content: center; color: #fff; font: inherit; font-weight: 600; font-size: 14px; cursor: pointer; overflow: hidden;
+.cat-tile { position: relative; flex: none; width: 112px; height: 84px; border: 0; padding: 0 6px 8px; display: flex; align-items: flex-end; justify-content: center; color: #fff; font: inherit; font-weight: 600; font-size: 14px; cursor: pointer; overflow: hidden;
   background: linear-gradient(145deg, var(--c), color-mix(in srgb, var(--c) 55%, #000)); border-right: 1px solid rgba(255,255,255,.7); }
 .cat-tile img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: transform .4s var(--ease); }
 .cat-tile::before { content: ''; position: absolute; inset: 0; z-index: 1; background: linear-gradient(transparent 30%, rgba(0,0,0,.6)); }
-.cat-tile span { position: relative; z-index: 2; text-shadow: 0 1px 6px rgba(0,0,0,.5); }
+.cat-tile span { position: relative; z-index: 2; text-shadow: 0 1px 6px rgba(0,0,0,.5); line-height: 1.2; }
+.cat-tile small { position: absolute; z-index: 2; top: 6px; right: 6px; min-width: 22px; padding: 1px 6px; border-radius: 99px; background: rgba(0,0,0,.45); font-size: 11px; font-weight: 700; }
 .cat-tile:hover img { transform: scale(1.08); }
 .cat-tile:not(.on) { filter: saturate(.75) brightness(.92); }
 .cat-tile.on::after { content: ''; position: absolute; left: 50%; bottom: 0; z-index: 3; transform: translateX(-50%); border: 8px solid transparent; border-bottom-color: var(--bg); }
-.zone-prod { flex: 1; overflow-y: auto; padding: 18px; }
-.grid-prod { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
-.prod { position: relative; aspect-ratio: 1.12; border: 1px solid var(--border); border-radius: 10px; padding: 0; overflow: hidden; cursor: pointer; font: inherit; color: #fff;
-  display: flex; align-items: center; justify-content: center; background: linear-gradient(145deg, color-mix(in srgb, var(--primary) 70%, #fff), var(--primary)); transition: transform .15s var(--ease), box-shadow .15s; }
-.prod img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.prod .ph { opacity: .55; }
-.prod::before { content: ''; position: absolute; inset: 0; z-index: 1; background: linear-gradient(rgba(0,0,0,.22), rgba(0,0,0,.05) 40%, rgba(0,0,0,.5)); }
-.prod .nom { position: relative; z-index: 2; margin-top: auto; align-self: stretch; padding: 8px 8px 10px; text-align: center; font-size: 15px; font-weight: 600; line-height: 1.2; text-shadow: 0 1px 6px rgba(0,0,0,.6); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.prod:hover:not(:disabled) { transform: translateY(-3px); box-shadow: 0 14px 28px color-mix(in srgb, var(--primary) 28%, transparent); }
-.prod:active:not(:disabled) { transform: scale(.96); }
-.prod:disabled { opacity: .5; cursor: not-allowed; filter: grayscale(.6); }
-.prod .price { position: absolute; z-index: 2; top: 8px; left: 8px; background: rgba(0,0,0,.55); backdrop-filter: blur(4px); padding: 3px 9px; border-radius: 99px; font-size: 13px; font-weight: 800; }
-.stk { position: absolute; z-index: 2; top: 8px; right: 8px; font-size: 11px; padding: 3px 8px; border-radius: 99px; background: rgba(43,158,107,.9); color: #fff; font-weight: 600; }
-.stk.low { background: rgba(232,137,12,.92); } .stk.bad { background: rgba(230,73,128,.92); } .stk.svc { background: rgba(112,72,232,.9); }
-.in-cart { position: absolute; z-index: 3; left: 50%; top: 42%; transform: translate(-50%, -50%); min-width: 38px; height: 38px; border-radius: 99px; background: var(--success); color: #fff; font-weight: 800; display: grid; place-items: center; padding: 0 10px; box-shadow: 0 6px 16px rgba(0,0,0,.3); animation: pop .25s var(--ease); }
+.zone-prod { flex: 1; overflow-y: auto; padding: 16px; }
+.grid-prod { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: 12px; }
+.prod { position: relative; display: flex; flex-direction: column; padding: 0; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,.05); transition: transform .15s var(--ease), box-shadow .15s, border-color .15s; }
+.visuel { position: relative; aspect-ratio: 4 / 3; display: grid; place-items: center; background: #fff; border-bottom: 1px solid var(--border); overflow: hidden; }
+.visuel img { width: 100%; height: 100%; object-fit: contain; padding: 6px; transition: transform .3s var(--ease); }
+.mono { width: 100%; height: 100%; display: grid; place-items: center; color: color-mix(in srgb, var(--c) 70%, #fff);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--c) 10%, #fff), color-mix(in srgb, var(--c) 22%, #fff)); }
+.infos { flex: 1; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px 10px; border-top: 3px solid var(--c); }
+.prod .nom { font-size: 13.5px; font-weight: 600; line-height: 1.25; min-height: 2.5em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.bas { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
+.prod .price { font-size: 15px; font-weight: 800; color: var(--primary); white-space: nowrap; }
+.stk { font-size: 11px; padding: 2px 7px; border-radius: 99px; background: var(--success-soft); color: var(--success); font-weight: 700; white-space: nowrap; }
+.stk.low { background: var(--warning-soft); color: var(--warning); } .stk.svc { background: color-mix(in srgb, #7048e8 14%, transparent); color: #7048e8; }
+.bandeau { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px; background: color-mix(in srgb, var(--danger) 88%, transparent); color: #fff; font-size: 12px; font-weight: 800; text-align: center; letter-spacing: .06em; text-transform: uppercase; }
+.in-cart { position: absolute; top: 8px; right: 8px; min-width: 32px; height: 32px; padding: 0 9px; border-radius: 99px; background: var(--success); color: #fff; font-weight: 800; font-size: 15px; display: grid; place-items: center; box-shadow: 0 4px 12px rgba(0,0,0,.25); animation: pop .25s var(--ease); }
+.prod:hover:not(:disabled) { transform: translateY(-2px); border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); box-shadow: 0 10px 22px color-mix(in srgb, var(--primary) 18%, transparent); }
+.prod:hover:not(:disabled) .visuel img { transform: scale(1.05); }
+.prod:active:not(:disabled) { transform: scale(.97); }
+.prod:focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }
+.prod.choisi { border-color: var(--success); box-shadow: 0 0 0 2px var(--success); }
+.prod.out .visuel img, .prod.out .mono { filter: grayscale(1); opacity: .45; }
+.prod.out .infos { opacity: .6; }
+.prod:disabled { cursor: not-allowed; }
+@media (max-width: 560px) { .grid-prod { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; } .zone-prod { padding: 10px; } }
 
 .drawer-wrap { position: fixed; inset: 0; z-index: 60; background: rgba(20, 12, 40, .5); }
 .drawer { width: min(300px, 86vw); height: 100%; background: var(--surface); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; padding: 0 0 12px; }
@@ -733,7 +756,7 @@ function raccourcis(e) {
   .catalogue { order: -1; } .cart { border-right: 0; } .lines { max-height: 40vh; }
   .zone-prod { overflow: visible; }
 }
-@media (prefers-reduced-motion: reduce) { .prod, .cat-tile img, .ligne-enter-active, .ligne-leave-active { transition: none; } .in-cart { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .prod, .visuel img, .cat-tile img, .ligne-enter-active, .ligne-leave-active { transition: none; } .in-cart { animation: none; } }
 .caisse-fixe { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface-2); }
 .caisse-fixe .muted { margin-left: auto; font-size: 13px; }
 </style>

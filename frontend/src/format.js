@@ -19,7 +19,9 @@ export function monthLabel(ym) {
 
 /** Unité accordée en nombre : « 2 pièces », « 1,5 pièce » ; abréviations (kg, L, ml…) et expressions laissées telles quelles. */
 export function uniteAccord(q, unite) {
-  const u = String(unite || '').trim()
+  let u = String(unite || '').trim()
+  // « bouteille(s) », « boite(s) » saisis tels quels : on accorde au lieu d'afficher la parenthèse
+  if (/\(s\)$/.test(u)) return u.slice(0, -3) + (Math.abs(Number(q)) >= 2 ? 's' : '')
   if (Math.abs(Number(q)) < 2 || !/^\p{Ll}{3,}$/u.test(u) || /[sxz]$/.test(u)) return u
   return /(au|eu)$/.test(u) ? `${u}x` : `${u}s`
 }
