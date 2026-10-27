@@ -2,12 +2,13 @@
 // Fiche fournisseur : ce qu'on lui doit vient de ses factures (saisies ici), jamais des réceptions de marchandises (confidentialité).
 import { ref, reactive, computed, onMounted } from 'vue'
 import { api, auth, ApiError } from '../api'
-import { money, date, initiales, today } from '../format'
+import { money, qty, date, initiales, today } from '../format'
 import { toast } from '../toast'
 import Icon from '../components/Icon.vue'
 import HistoriqueFiche from '../components/HistoriqueFiche.vue'
 import ReglementModal from '../components/ReglementModal.vue'
 import Fenetre from '../components/Fenetre.vue'
+import SearchSelect from '../components/SearchSelect.vue'
 
 const props = defineProps({ id: { type: String, required: true } })
 const d = ref(null)
@@ -21,18 +22,38 @@ const peutFacturer = computed(() => !!auth.user?.droits?.achats)
 const peutRetirer = computed(() => !!(auth.user?.admin || auth.user?.super))
 async function fait() { regler.value = false; await charger() }
 
-/* ---- Factures ---- */
-const fac = reactive({ ouvert: false, montant: '', reference: '', date_facture: today(), note: '', busy: false, erreurs: {} })
-function nouvelleFacture() { Object.assign(fac, { ouvert: true, montant: '', reference: '', date_facture: today(), note: '', erreurs: {} }) }
+/* ---- Factures : détail produit / quantité / prix (ou montant global) ---- */
+const produits = ref([])
+const ligneVide = () => ({ cle: '', quantite: '', prix_unitaire: '' })   // cle : id produit, ou « L:texte » pour un libellé libre
+const fac = reactive({ ouvert: false, detail: true, lignes: [], montant: '', reference: '', date_facture: today(), note: '', busy: false, erreurs: {} })
+async function nouvelleFacture() {
+  if (!produits.value.length) { try { produits.value = (await api.get('produits', { all: 1, sort: 'nom', dir: 'asc' })).data } catch (e) { toast(e.message, 'error') } }
+  Object.assign(fac, { ouvert: true, detail: true, lignes: [ligneVide()], montant: '', reference: '', date_facture: today(), note: '', erreurs: {} })
+}
+const optProduits = computed(() => produits.value.map((p) => ({ value: p.idprod, label: p.nom + (p.sku ? ` (${p.sku})` : '') })))
+const optionsLigne = (l) => (String(l.cle).startsWith('L:') ? [{ value: l.cle, label: `${l.cle.slice(2)} — libellé libre` }, ...optProduits.value] : optProduits.value)
+function choisir(l, v) {
+  l.cle = v
+  const p = produits.value.find((x) => x.idprod === v)
+  if (p && l.prix_unitaire === '') l.prix_unitaire = Number(p.prix_achat) || ''
+  if (l === fac.lignes[fac.lignes.length - 1]) fac.lignes.push(ligneVide())   // une ligne vide toujours prête
+}
+const totalLigne = (l) => (Number(l.quantite) || 0) * (Number(l.prix_unitaire) || 0)
+const lignesSaisies = computed(() => fac.lignes.filter((l) => l.cle !== ''))
+const totalFacture = computed(() => (fac.detail ? lignesSaisies.value.reduce((s, l) => s + totalLigne(l), 0) : Number(fac.montant) || 0))
+function retirerLigne(i) { fac.lignes.splice(i, 1); if (!fac.lignes.length) fac.lignes.push(ligneVide()) }
 async function enregistrerFacture() {
   fac.busy = true; fac.erreurs = {}
   try {
-    await api.post('facture-fournisseur', { idfour: f.value.idfour, montant: fac.montant, reference: fac.reference, date_facture: fac.date_facture, note: fac.note })
+    const lignes = fac.detail ? lignesSaisies.value.map((l) => ({ ...(String(l.cle).startsWith('L:') ? { designation: l.cle.slice(2) } : { idprod: l.cle }), quantite: l.quantite, prix_unitaire: l.prix_unitaire })) : []
+    if (fac.detail && !lignes.length) { fac.erreurs = { lignes: 'Ajoutez au moins un produit, ou passez en montant global' }; return }
+    await api.post('facture-fournisseur', { idfour: f.value.idfour, lignes, montant: fac.detail ? '' : fac.montant, reference: fac.reference, date_facture: fac.date_facture, note: fac.note })
     toast('Facture enregistrée — la dette envers le fournisseur est à jour'); fac.ouvert = false; await charger()
   } catch (e) {
     if (e instanceof ApiError && Object.keys(e.errors).length) fac.erreurs = e.errors; else toast(e.message, 'error')
   } finally { fac.busy = false }
 }
+const ouverte = ref(null)   // facture dont le détail est déplié
 const aRetirer = ref(null)   // retrait en deux temps : « Retirer » puis « Confirmer »
 async function retirer(x) {
   if (aRetirer.value !== x.idfacture) { aRetirer.value = x.idfacture; return }
@@ -69,13 +90,17 @@ async function retirer(x) {
           <div class="card-head"><h2>Factures</h2><button v-if="peutFacturer" class="btn sm ghost" @click="nouvelleFacture"><Icon name="plus" :size="14" /> Ajouter</button></div>
           <div v-if="!d.factures.length" class="muted">Aucune facture enregistrée.</div>
           <div class="list">
-            <div v-for="x in d.factures" :key="x.idfacture" class="item">
+            <div v-for="x in d.factures" :key="x.idfacture" class="item facture" :class="{ ouverte: ouverte === x.idfacture }">
               <span class="tile primary"><Icon name="file" :size="19" /></span>
-              <div class="grow"><b>{{ x.reference || 'Facture sans n°' }}</b><span>{{ date(x.date_facture) }}<template v-if="x.note"> · {{ x.note }}</template></span></div>
+              <div class="grow"><b>{{ x.reference || 'Facture sans n°' }}</b><span>{{ date(x.date_facture) }}<template v-if="x.lignes.length"> · {{ x.lignes.length }} article{{ x.lignes.length > 1 ? 's' : '' }}</template><template v-if="x.note"> · {{ x.note }}</template></span></div>
               <b>{{ money(x.montant) }}</b>
+              <button v-if="x.lignes.length" class="btn sm ghost icon" :aria-expanded="ouverte === x.idfacture" :aria-label="`Détail de la facture ${x.reference}`" :title="ouverte === x.idfacture ? 'Masquer le détail' : 'Voir le détail'" @click="ouverte = ouverte === x.idfacture ? null : x.idfacture"><Icon :name="ouverte === x.idfacture ? 'up' : 'down'" :size="15" /></button>
               <button v-if="peutRetirer" class="btn sm" :class="aRetirer === x.idfacture ? 'danger' : 'ghost icon'" :aria-label="`Retirer la facture ${x.reference}`" :title="aRetirer === x.idfacture ? '' : 'Retirer (saisie erronée)'" @click="retirer(x)" @blur="aRetirer = null">
                 <template v-if="aRetirer === x.idfacture">Confirmer</template><Icon v-else name="trash" :size="15" />
               </button>
+              <table v-if="ouverte === x.idfacture" class="detail-facture">
+                <tbody><tr v-for="(l, i) in x.lignes" :key="i"><td>{{ l.designation }}</td><td class="num">{{ qty(l.quantite) }} × {{ money(l.prix_unitaire) }}</td><td class="num">{{ money(l.total) }}</td></tr></tbody>
+              </table>
             </div>
           </div>
         </section>
@@ -94,17 +119,35 @@ async function retirer(x) {
     </template>
     <ReglementModal v-if="regler" type="fournisseur" :id="f.idfour" :nom="f.nom" :solde="f.solde" @close="regler = false" @done="fait" />
 
-    <Fenetre v-if="fac.ouvert" :titre="`Facture de ${f.nom}`" sous-titre="Le montant s'ajoute à ce que nous lui devons" icone="file" largeur="sm" formulaire :occupe="fac.busy" @close="fac.ouvert = false" @submit="enregistrerFacture">
-        <div style="display:flex;flex-direction:column;gap:14px">
-          <div class="field" :class="{ invalid: fac.erreurs.montant }"><label for="fac-m">Montant <span class="req">*</span></label><input id="fac-m" v-model="fac.montant" class="input big" type="number" min="1" inputmode="numeric" autofocus /><span v-if="fac.erreurs.montant" class="error">{{ fac.erreurs.montant }}</span></div>
-          <div class="deux">
-            <div class="field"><label for="fac-r">N° de facture</label><input id="fac-r" v-model="fac.reference" class="input" maxlength="60" /></div>
+    <Fenetre v-if="fac.ouvert" :titre="`Facture de ${f.nom}`" sous-titre="Le total s'ajoute à ce que nous lui devons" icone="file" :largeur="780" formulaire :occupe="fac.busy" @close="fac.ouvert = false" @submit="enregistrerFacture">
+        <div class="facture-form">
+          <div class="trois">
+            <div class="field"><label for="fac-r">N° de facture</label><input id="fac-r" v-model="fac.reference" class="input" maxlength="60" autofocus /></div>
             <div class="field" :class="{ invalid: fac.erreurs.date_facture }"><label for="fac-d">Date</label><input id="fac-d" v-model="fac.date_facture" class="input" type="date" :max="today()" /><span v-if="fac.erreurs.date_facture" class="error">{{ fac.erreurs.date_facture }}</span></div>
+            <div class="field"><label>Saisie</label><div class="seg"><button type="button" :class="{ on: fac.detail }" @click="fac.detail = true">Produits</button><button type="button" :class="{ on: !fac.detail }" @click="fac.detail = false">Montant global</button></div></div>
           </div>
+
+          <div v-if="fac.detail" class="field" :class="{ invalid: fac.erreurs.lignes }">
+            <div class="fline tete" aria-hidden="true"><span>Produit</span><span>Quantité</span><span>Prix unitaire</span><span>Total</span><span /></div>
+            <div v-for="(l, i) in fac.lignes" :key="i" class="fline">
+              <SearchSelect :id="`fac-p${i}`" :model-value="l.cle" :options="optionsLigne(l)" placeholder="Produit ou libellé…" create-label="libellé" @update:model-value="choisir(l, $event)" @create="(t) => t.trim() && choisir(l, 'L:' + t.trim())" />
+              <input v-model="l.quantite" class="input" type="number" min="0" step="any" inputmode="decimal" placeholder="Qté" :aria-label="`Quantité ligne ${i + 1}`" />
+              <input v-model="l.prix_unitaire" class="input" type="number" min="0" step="any" inputmode="numeric" placeholder="Prix" :aria-label="`Prix unitaire ligne ${i + 1}`" />
+              <b class="lt">{{ l.cle !== '' ? money(totalLigne(l)) : '' }}</b>
+              <button type="button" class="btn ghost icon sm" :aria-label="`Retirer la ligne ${i + 1}`" :disabled="fac.lignes.length === 1 && l.cle === ''" @click="retirerLigne(i)"><Icon name="x" :size="15" /></button>
+            </div>
+            <span v-if="fac.erreurs.lignes" class="error">{{ fac.erreurs.lignes }}</span>
+            <small class="hint">Produit introuvable (transport, emballage…) ? Tapez son libellé puis « Créer ». Le stock n'est pas modifié : les entrées passent par les réceptions.</small>
+          </div>
+          <div v-else class="field" :class="{ invalid: fac.erreurs.montant }"><label for="fac-m">Montant <span class="req">*</span></label><input id="fac-m" v-model="fac.montant" class="input big" type="number" min="1" inputmode="numeric" /><span v-if="fac.erreurs.montant" class="error">{{ fac.erreurs.montant }}</span></div>
+
           <div class="field"><label for="fac-n">Note</label><input id="fac-n" v-model="fac.note" class="input" maxlength="300" placeholder="Facultatif" /></div>
-          <p class="muted" style="margin:0;font-size:13px">Les réceptions de marchandises restent anonymes : elles ne sont jamais rattachées à un fournisseur.</p>
         </div>
-        <template #pied><button type="button" class="btn" :disabled="fac.busy" @click="fac.ouvert = false">Annuler</button><button class="btn primary" :disabled="fac.busy"><Icon name="check" :size="16" /> {{ fac.busy ? 'Enregistrement…' : 'Enregistrer' }}</button></template>
+        <template #pied>
+          <span class="grow total-pied">Total <b>{{ money(totalFacture) }}</b></span>
+          <button type="button" class="btn" :disabled="fac.busy" @click="fac.ouvert = false">Annuler</button>
+          <button class="btn primary" :disabled="fac.busy || totalFacture <= 0"><Icon name="check" :size="16" /> {{ fac.busy ? 'Enregistrement…' : 'Enregistrer la facture' }}</button>
+        </template>
     </Fenetre>
   </main>
 </template>
@@ -112,4 +155,18 @@ async function retirer(x) {
 <style scoped>
 .actions { display: flex; flex-wrap: wrap; gap: 8px; position: relative; z-index: 1; }
 .input.big { font-size: 20px; font-weight: 700; }
+.facture { flex-wrap: wrap; }
+.detail-facture { width: 100%; margin: 4px 0 2px 52px; border-collapse: collapse; font-size: 13.5px; }
+.detail-facture td { padding: 5px 4px; border-top: 1px dashed var(--border); } .detail-facture .num { text-align: right; white-space: nowrap; }
+.facture-form { display: flex; flex-direction: column; gap: 16px; }
+.trois { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: start; }
+.fline { display: grid; grid-template-columns: minmax(0, 1fr) 90px 120px 110px 34px; gap: 8px; align-items: center; margin-bottom: 8px; }
+.fline.tete { margin-bottom: 4px; color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.fline .lt { text-align: right; white-space: nowrap; }
+@media (max-width: 640px) {
+  .trois { grid-template-columns: 1fr 1fr; } .trois > :last-child { grid-column: 1 / -1; }
+  .fline { grid-template-columns: 1fr 1fr 34px; padding: 10px; border: 1px solid var(--border); border-radius: 14px; }
+  .fline > :first-child { grid-column: 1 / -1; } .fline .lt { grid-column: 1 / 3; grid-row: 3; text-align: left; } .fline > button { grid-row: 2; grid-column: 3; }
+  .fline.tete { display: none; }
+}
 </style>

@@ -288,7 +288,7 @@ switch ($r) {
         if ($method === 'POST') {
             $x = facture_fournisseur_creer($bdd, $user, $corps);
             journaliser($bdd, $user, 'create', 'fournisseurs', (int)$corps['idfour'], "Facture du fournisseur « {$x['fournisseur']} » · " . journal_montant($x['montant']) . $devise,
-                ['reference' => (string)($corps['reference'] ?? ''), 'date' => (string)($corps['date_facture'] ?? ''), 'solde_du' => $x['solde']]);
+                ['reference' => (string)($corps['reference'] ?? ''), 'date' => (string)($corps['date_facture'] ?? ''), 'lignes' => $x['nb_lignes'], 'solde_du' => $x['solde']]);
             json_out(['facture' => $x], 201);
         }
         if ($method === 'DELETE') {

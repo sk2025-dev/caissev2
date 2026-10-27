@@ -153,6 +153,13 @@ list($c, $j) = $m->call('POST', 'facture-fournisseur', [], ['idfour' => $four, '
 $pdo->exec("UPDATE fournisseurs SET solde = 500 WHERE idfour = $four");
 list($c) = $a->call('DELETE', 'facture-fournisseur', ['id' => $facPayee]); check('facture déjà réglée : retrait refusé', $c === 409);
 $pdo->exec("UPDATE fournisseurs SET solde = 40000 WHERE idfour = $four"); $pdo->exec("UPDATE fournisseur_factures SET supp = 1 WHERE idfacture = $facPayee");
+list($c, $j) = $m->call('POST', 'facture-fournisseur', [], ['idfour' => $four, 'reference' => 'FAC-900', 'montant' => 1, 'lignes' => [['idprod' => $eau, 'quantite' => 10, 'prix_unitaire' => 350], ['designation' => 'Transport', 'quantite' => 1, 'prix_unitaire' => 2500]]]);
+check('facture détaillée : total = somme des lignes (montant saisi ignoré)', $c === 201 && $j['facture']['montant'] == 6000 && $j['facture']['nb_lignes'] === 2, json_encode($j)); $facLignes = $j['facture']['idfacture'];
+check('facture détaillée : lignes enregistrées, stock inchangé', (int)$pdo->query("SELECT COUNT(*) FROM fournisseur_facture_lignes WHERE idfacture = $facLignes")->fetchColumn() === 2 && (float)$pdo->query("SELECT stock_qty FROM produits WHERE idprod = $eau")->fetchColumn() === 200.0);
+list($c, $j) = $m->call('GET', 'fournisseur-detail', ['id' => $four]); check('fiche fournisseur : détail des lignes de la facture', count($j['factures'][0]['lignes']) === 2 && $j['factures'][0]['lignes'][1]['designation'] === 'Transport');
+list($c, $j) = $m->call('POST', 'facture-fournisseur', [], ['idfour' => $four, 'lignes' => [['idprod' => $eau, 'quantite' => 0, 'prix_unitaire' => 350]]]); check('ligne sans quantité -> 422', $c === 422 && isset($j['errors']['lignes']));
+list($c, $j) = $m->call('POST', 'facture-fournisseur', [], ['idfour' => $four, 'lignes' => [['idprod' => 999999, 'quantite' => 1, 'prix_unitaire' => 10]]]); check('ligne avec produit inconnu -> 422', $c === 422 && isset($j['errors']['lignes']));
+list($c) = $a->call('DELETE', 'facture-fournisseur', ['id' => $facLignes]); check('facture détaillée retirée', $c === 200 && (float)$pdo->query("SELECT solde FROM fournisseurs WHERE idfour = $four")->fetchColumn() === 40000.0);
 list($c, $j) = $m->call('GET', 'produit-detail', ['id' => $eau]); check('fiche produit : mouvements et ventes sur 30 jours', $c === 200 && count($j['mouvements']) >= 3 && $j['ventes_30j']['qte'] == 0, json_encode($j['ventes_30j'] ?? null));
 
 

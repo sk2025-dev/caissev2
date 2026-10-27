@@ -93,6 +93,34 @@ function appros_liste(PDO $db, array $q)
 
 /* ---------- Factures fournisseurs : ce qu'on lui doit (indépendant des réceptions) ---------- */
 
+/**
+ * Lignes d'une facture : produit du catalogue ou libellé libre (transport, emballage…), quantité, prix unitaire.
+ * Le montant de la facture est alors leur somme ; sans ligne, un montant global est saisi.
+ */
+function facture_lignes(PDO $db, array $lignesIn)
+{
+    if (count($lignesIn) > 200) err_lignes('200 lignes maximum par facture');
+    $lignes = [];
+    $nom = $db->prepare('SELECT nom FROM produits WHERE idprod = ? AND supp = 0');
+    $num = function ($v) { $v = str_replace([' ', "\xC2\xA0", ','], ['', '', '.'], (string)$v); return is_numeric($v) ? (float)$v : null; };
+    foreach (array_values($lignesIn) as $i => $l) {
+        $n = $i + 1;
+        $idprod = !empty($l['idprod']) ? (int)$l['idprod'] : null;
+        $designation = mb_substr(trim((string)($l['designation'] ?? '')), 0, 150);
+        if ($idprod) {
+            $nom->execute([$idprod]);
+            $designation = $nom->fetchColumn();
+            if ($designation === false) err_lignes("Ligne $n : produit inconnu");
+        }
+        if ($designation === '') err_lignes("Ligne $n : choisissez un produit ou saisissez un libellé");
+        $q = $num($l['quantite'] ?? ''); $pu = $num($l['prix_unitaire'] ?? '');
+        if ($q === null || $q <= 0) err_lignes("Ligne $n ($designation) : quantité attendue");
+        if ($pu === null || $pu < 0) err_lignes("Ligne $n ($designation) : prix unitaire attendu");
+        $lignes[] = [$idprod, $designation, round($q, 3), round($pu, 2), round($q * $pu, 2)];
+    }
+    return $lignes;
+}
+
 function facture_fournisseur_creer(PDO $db, array $user, array $in)
 {
     exiger($user, 'achats.ecrire', "Seul le magasinier ou le gérant peut enregistrer une facture fournisseur.");
@@ -100,18 +128,22 @@ function facture_fournisseur_creer(PDO $db, array $user, array $in)
     $date = trim((string)($in['date_facture'] ?? '')) ?: gmdate('Y-m-d');
     $d = DateTime::createFromFormat('Y-m-d', $date);
     if (!$d || $d->format('Y-m-d') !== $date || $date > gmdate('Y-m-d')) $err['date_facture'] = 'Date invalide';
-    $montant = round(nombre($in['montant'] ?? '', 'montant', 0.01), 2);
     if ($err) throw new ApiError(422, 'Données invalides', $err);
+    $lignes = facture_lignes($db, isset($in['lignes']) && is_array($in['lignes']) ? $in['lignes'] : []);
+    $montant = $lignes ? round(array_sum(array_column($lignes, 4)), 2) : round(nombre($in['montant'] ?? '', 'montant', 0.01), 2);
+    if ($montant <= 0) err_lignes('Le total de la facture doit être supérieur à zéro');
     $id = (int)($in['idfour'] ?? 0);
-    return stock_transaction($db, function () use ($db, $user, $in, $id, $date, $montant) {
+    return stock_transaction($db, function () use ($db, $user, $in, $id, $date, $montant, $lignes) {
         $st = $db->prepare('SELECT * FROM fournisseurs WHERE idfour = ? AND supp = 0 FOR UPDATE'); $st->execute([$id]);
         $f = $st->fetch(PDO::FETCH_ASSOC);
         if (!$f) throw new ApiError(404, 'Fournisseur introuvable');
         $db->prepare('INSERT INTO fournisseur_factures (idfour, reference, date_facture, montant, note, iduser, created_at) VALUES (?,?,?,?,?,?,?)')
             ->execute([$id, mb_substr(trim((string)($in['reference'] ?? '')), 0, 60), $date, $montant, mb_substr(trim((string)($in['note'] ?? '')), 0, 300), $user['id'], gmdate('Y-m-d H:i:s')]);
         $idfacture = (int)$db->lastInsertId();
+        $ins = $db->prepare('INSERT INTO fournisseur_facture_lignes (idfacture, idprod, designation, quantite, prix_unitaire, total) VALUES (?,?,?,?,?,?)');
+        foreach ($lignes as $l) $ins->execute(array_merge([$idfacture], $l));
         $db->prepare('UPDATE fournisseurs SET solde = solde + ? WHERE idfour = ?')->execute([$montant, $id]);
-        return ['idfacture' => $idfacture, 'fournisseur' => $f['nom'], 'montant' => $montant, 'solde' => round($f['solde'] + $montant, 2)];
+        return ['idfacture' => $idfacture, 'fournisseur' => $f['nom'], 'montant' => $montant, 'nb_lignes' => count($lignes), 'solde' => round($f['solde'] + $montant, 2)];
     });
 }
 
@@ -134,7 +166,13 @@ function factures_fournisseur(PDO $db, $idfour, $limite = 20)
 {
     $st = $db->prepare("SELECT x.idfacture, x.reference, x.date_facture, x.montant, x.note, x.created_at, CONCAT(u.nomag, ' ', u.prenom) AS utilisateur FROM fournisseur_factures x LEFT JOIN users u ON u.id_user = x.iduser WHERE x.idfour = ? AND x.supp = 0 ORDER BY x.date_facture DESC, x.idfacture DESC LIMIT " . (int)$limite);
     $st->execute([(int)$idfour]);
-    return array_map(function ($r) { $r['utilisateur'] = trim((string)$r['utilisateur']); return $r; }, $st->fetchAll(PDO::FETCH_ASSOC));
+    $factures = $st->fetchAll(PDO::FETCH_ASSOC);
+    $lignes = [];
+    if ($factures) {
+        $ids = implode(',', array_map('intval', array_column($factures, 'idfacture')));
+        foreach ($db->query("SELECT idfacture, idprod, designation, quantite, prix_unitaire, total FROM fournisseur_facture_lignes WHERE idfacture IN ($ids) ORDER BY idligne")->fetchAll(PDO::FETCH_ASSOC) as $l) $lignes[$l['idfacture']][] = $l;
+    }
+    return array_map(function ($r) use ($lignes) { $r['utilisateur'] = trim((string)$r['utilisateur']); $r['lignes'] = $lignes[$r['idfacture']] ?? []; return $r; }, $factures);
 }
 
 /** Règlement d'une dette fournisseur ou d'une créance client (paiement partiel possible, jamais supérieur au solde). */
