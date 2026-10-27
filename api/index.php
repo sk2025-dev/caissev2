@@ -4,7 +4,7 @@
  *   auth/* · public-config · dashboard · dashboard-mensuel · lookups · search · alertes · exports · config*
  *   caisse : pos-catalogue · mouvements-caisse · session-* · operation-caisse · depense-creer · categorie-mouvement-creer · justificatif · vente-creer · ventes · vente · vente-annuler · paniers
  *   commandes : commandes · commande · commandes-jour · commandes-jour-pdf · commande-creer · commande-statut · commande-livrer · commande-annuler
- *   stock : stock-ajuster · inventaire · inventaires · mouvements-stock · stock-balance    achats : appro-creer · appros · appro · facture-fournisseur · reglement-creer · reglements
+ *   stock : stock-ajuster · inventaire · inventaires · mouvements-stock · stock-balance    achats : appro-creer · appros · appro · facture-fournisseur · factures-libelles · reglement-creer · reglements
  *   fiches : produit-detail · client-detail · fournisseur-detail    traçabilité : journal
  *   caisses : caisse-config (produits vendus, numérotation, ticket propres à chaque caisse)
  *   catalogue numérique (public, sans compte) : catalogue · catalogue-produit · catalogue-image    réglages : catalogue-config
@@ -284,6 +284,7 @@ switch ($r) {
         json_out(['appro' => $a], 201);
     case 'appros': exiger($user, 'achats.lire'); json_out(appros_liste($bdd, $q));
     case 'appro': exiger($user, 'achats.lire'); json_out(['appro' => appro_detail($bdd, $id)]);
+    case 'factures-libelles': json_out(['libelles' => factures_libelles($bdd, $user, $id)]);
     case 'facture-fournisseur':   // POST : enregistrer une facture (dette) ; DELETE : la retirer (gérant)
         if ($method === 'POST') {
             $x = facture_fournisseur_creer($bdd, $user, $corps);

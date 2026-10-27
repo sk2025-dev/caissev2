@@ -8,7 +8,6 @@ import Icon from '../components/Icon.vue'
 import HistoriqueFiche from '../components/HistoriqueFiche.vue'
 import ReglementModal from '../components/ReglementModal.vue'
 import Fenetre from '../components/Fenetre.vue'
-import SearchSelect from '../components/SearchSelect.vue'
 
 const props = defineProps({ id: { type: String, required: true } })
 const d = ref(null)
@@ -22,31 +21,30 @@ const peutFacturer = computed(() => !!auth.user?.droits?.achats)
 const peutRetirer = computed(() => !!(auth.user?.admin || auth.user?.super))
 async function fait() { regler.value = false; await charger() }
 
-/* ---- Factures : détail produit / quantité / prix (ou montant global) ---- */
-const produits = ref([])
-const ligneVide = () => ({ cle: '', quantite: '', prix_unitaire: '' })   // cle : id produit, ou « L:texte » pour un libellé libre
+/* ---- Factures : désignation libre / quantité / prix (ou montant global), sans lien avec le catalogue ---- */
+const ligneVide = () => ({ designation: '', quantite: '', prix_unitaire: '' })
 const fac = reactive({ ouvert: false, detail: true, lignes: [], montant: '', reference: '', date_facture: today(), note: '', busy: false, erreurs: {} })
-async function nouvelleFacture() {
-  if (!produits.value.length) { try { produits.value = (await api.get('produits', { all: 1, sort: 'nom', dir: 'asc' })).data } catch (e) { toast(e.message, 'error') } }
+const libelles = ref([])   // désignations déjà saisies sur des factures (ce fournisseur d'abord), avec le dernier prix
+function nouvelleFacture() {
   Object.assign(fac, { ouvert: true, detail: true, lignes: [ligneVide()], montant: '', reference: '', date_facture: today(), note: '', erreurs: {} })
+  api.get('factures-libelles', { id: f.value.idfour }).then((r) => { libelles.value = r.libelles }).catch(() => {})
 }
-const optProduits = computed(() => produits.value.map((p) => ({ value: p.idprod, label: p.nom + (p.sku ? ` (${p.sku})` : '') })))
-const optionsLigne = (l) => (String(l.cle).startsWith('L:') ? [{ value: l.cle, label: `${l.cle.slice(2)} — libellé libre` }, ...optProduits.value] : optProduits.value)
-function choisir(l, v) {
-  l.cle = v
-  const p = produits.value.find((x) => x.idprod === v)
-  if (p && l.prix_unitaire === '') l.prix_unitaire = Number(p.prix_achat) || ''
-  if (l === fac.lignes[fac.lignes.length - 1]) fac.lignes.push(ligneVide())   // une ligne vide toujours prête
+// Désignation connue : reprend le dernier prix si aucun n'est saisi. Une ligne vide reste toujours prête en bas de la liste.
+function saisie(l) {
+  const connu = libelles.value.find((x) => x.designation.toLowerCase() === l.designation.trim().toLowerCase())
+  if (connu && l.prix_unitaire === '') l.prix_unitaire = connu.prix
+  if (connu && l.quantite === '') l.quantite = 1
+  if (l === fac.lignes[fac.lignes.length - 1] && l.designation.trim()) fac.lignes.push(ligneVide())
 }
 const totalLigne = (l) => (Number(l.quantite) || 0) * (Number(l.prix_unitaire) || 0)
-const lignesSaisies = computed(() => fac.lignes.filter((l) => l.cle !== ''))
+const lignesSaisies = computed(() => fac.lignes.filter((l) => l.designation.trim() || l.quantite !== '' || l.prix_unitaire !== ''))
 const totalFacture = computed(() => (fac.detail ? lignesSaisies.value.reduce((s, l) => s + totalLigne(l), 0) : Number(fac.montant) || 0))
 function retirerLigne(i) { fac.lignes.splice(i, 1); if (!fac.lignes.length) fac.lignes.push(ligneVide()) }
 async function enregistrerFacture() {
   fac.busy = true; fac.erreurs = {}
   try {
-    const lignes = fac.detail ? lignesSaisies.value.map((l) => ({ ...(String(l.cle).startsWith('L:') ? { designation: l.cle.slice(2) } : { idprod: l.cle }), quantite: l.quantite, prix_unitaire: l.prix_unitaire })) : []
-    if (fac.detail && !lignes.length) { fac.erreurs = { lignes: 'Ajoutez au moins un produit, ou passez en montant global' }; return }
+    const lignes = fac.detail ? lignesSaisies.value.map((l) => ({ designation: l.designation.trim(), quantite: l.quantite, prix_unitaire: l.prix_unitaire })) : []
+    if (fac.detail && !lignes.length) { fac.erreurs = { lignes: 'Saisissez au moins une ligne, ou passez en montant global' }; return }
     await api.post('facture-fournisseur', { idfour: f.value.idfour, lignes, montant: fac.detail ? '' : fac.montant, reference: fac.reference, date_facture: fac.date_facture, note: fac.note })
     toast('Facture enregistrée — la dette envers le fournisseur est à jour'); fac.ouvert = false; await charger()
   } catch (e) {
@@ -128,16 +126,17 @@ async function retirer(x) {
           </div>
 
           <div v-if="fac.detail" class="field" :class="{ invalid: fac.erreurs.lignes }">
-            <div class="fline tete" aria-hidden="true"><span>Produit</span><span>Quantité</span><span>Prix unitaire</span><span>Total</span><span /></div>
+            <div class="fline tete" aria-hidden="true"><span>Désignation</span><span>Quantité</span><span>Prix unitaire</span><span>Total</span><span /></div>
             <div v-for="(l, i) in fac.lignes" :key="i" class="fline">
-              <SearchSelect :id="`fac-p${i}`" :model-value="l.cle" :options="optionsLigne(l)" placeholder="Produit ou libellé…" create-label="libellé" @update:model-value="choisir(l, $event)" @create="(t) => t.trim() && choisir(l, 'L:' + t.trim())" />
+              <input v-model="l.designation" class="input" maxlength="150" list="fac-libelles" autocomplete="off" placeholder="Saisir ou choisir…" :aria-label="`Désignation ligne ${i + 1}`" @input="saisie(l)" />
               <input v-model="l.quantite" class="input" type="number" min="0" step="any" inputmode="decimal" placeholder="Qté" :aria-label="`Quantité ligne ${i + 1}`" />
               <input v-model="l.prix_unitaire" class="input" type="number" min="0" step="any" inputmode="numeric" placeholder="Prix" :aria-label="`Prix unitaire ligne ${i + 1}`" />
-              <b class="lt">{{ l.cle !== '' ? money(totalLigne(l)) : '' }}</b>
-              <button type="button" class="btn ghost icon sm" :aria-label="`Retirer la ligne ${i + 1}`" :disabled="fac.lignes.length === 1 && l.cle === ''" @click="retirerLigne(i)"><Icon name="x" :size="15" /></button>
+              <b class="lt">{{ totalLigne(l) ? money(totalLigne(l)) : '' }}</b>
+              <button type="button" class="btn ghost icon sm" :aria-label="`Retirer la ligne ${i + 1}`" :disabled="fac.lignes.length === 1 && !lignesSaisies.includes(l)" @click="retirerLigne(i)"><Icon name="x" :size="15" /></button>
             </div>
+            <datalist id="fac-libelles"><option v-for="x in libelles" :key="x.designation" :value="x.designation">{{ money(x.prix) }}</option></datalist>
             <span v-if="fac.erreurs.lignes" class="error">{{ fac.erreurs.lignes }}</span>
-            <small class="hint">Produit introuvable (transport, emballage…) ? Tapez son libellé puis « Créer ». Le stock n'est pas modifié : les entrées passent par les réceptions.</small>
+            <small class="hint">Saisie libre, sans lien avec le catalogue{{ libelles.length ? ' : les désignations déjà utilisées sont proposées pendant la frappe, avec leur dernier prix' : '' }}. Le stock n'est pas modifié : les entrées de marchandises passent par les réceptions.</small>
           </div>
           <div v-else class="field" :class="{ invalid: fac.erreurs.montant }"><label for="fac-m">Montant <span class="req">*</span></label><input id="fac-m" v-model="fac.montant" class="input big" type="number" min="1" inputmode="numeric" /><span v-if="fac.erreurs.montant" class="error">{{ fac.erreurs.montant }}</span></div>
 
